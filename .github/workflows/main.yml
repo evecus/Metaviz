@@ -66,8 +66,7 @@ jobs:
           }
           build linux amd64 ""  metaviz-linux-amd64
           build linux arm64 ""  metaviz-linux-arm64
-          build linux arm   7   metaviz-linux-armv7
-
+  
       - name: Release (tag push)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
