@@ -66,7 +66,7 @@
                 <button v-if="nodesStore.nodes.length" class="btn btn-secondary btn-sm" style="margin-left:auto" @click="clearAllNodes">清空全部</button>
               </div>
               <div v-if="!nodesStore.nodes.length" class="empty-state">暂无导入节点</div>
-              <div v-else style="display:flex;flex-direction:column;gap:6px">
+              <div v-else style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto">
                 <div v-for="n in nodesStore.nodes" :key="n.id" class="item-card">
                   <span class="proto-badge" :class="'proto-'+n.protocol">{{ n.protocol }}</span>
                   <div style="flex:1;min-width:0">
@@ -86,7 +86,7 @@
                 <span class="card-title" style="margin:0">订阅列表（{{ subsStore.subs.length }}）</span>
               </div>
               <div v-if="!subsStore.subs.length" class="empty-state">暂无订阅</div>
-              <div v-else style="display:flex;flex-direction:column;gap:8px">
+              <div v-else style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
                 <div v-for="sub in subsStore.subs" :key="sub.id" class="sub-card">
                   <div style="display:flex;align-items:center;gap:8px">
                     <span class="proto-badge proto-sub">订阅</span>

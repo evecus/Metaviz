@@ -11,6 +11,6 @@ const (
 
 // Config is persisted to data/ipfilter.json.
 type Config struct {
-	Mode Mode   `json:"mode"`
-	IPs  string `json:"ips"` // space-separated CIDR / plain IPs
+	Mode Mode     `json:"mode"`
+	IPs  []string `json:"ips"` // list of CIDR / plain IPs
 }

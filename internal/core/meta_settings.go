@@ -23,13 +23,14 @@ type InboundSettings struct {
 
 type TunSettings struct {
 	Enable bool   `json:"enable"`
-	Device string `json:"device"`    // 默认 "Meta"
-	Stack  string `json:"stack"`     // system/gvisor/mixed，默认 mixed
-	MTU    int    `json:"mtu"`       // 默认 1500
+	Device string `json:"device"` // 默认 "Meta"
+	Stack  string `json:"stack"`  // system/gvisor/mixed，默认 mixed
+	MTU    int    `json:"mtu"`    // 默认 1500
 }
 
 type SnifferSettings struct {
-	Enable bool `json:"enable"`
+	Enable              bool `json:"enable"`
+	OverrideDestination bool `json:"overrideDestination"`
 }
 
 // LogSettings — mihomo 用 log-level 字符串，"silent" 表示禁用
@@ -79,7 +80,8 @@ func DefaultMetaSettings() MetaSettings {
 			MTU:    1500,
 		},
 		Sniffer: SnifferSettings{
-			Enable: true,
+			Enable:              true,
+			OverrideDestination: true,
 		},
 		Log: LogSettings{
 			Level: "warning",

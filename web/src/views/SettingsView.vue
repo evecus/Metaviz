@@ -92,11 +92,8 @@
         <!-- ── TUN 配置 ────────────────────────────────────── -->
         <div class="card">
           <div class="card-title">TUN 配置</div>
-          <div class="toggle-row" style="margin-bottom:12px">
-            <div><div class="toggle-label">启用 TUN</div><div class="toggle-desc">创建虚拟网卡（由面板控制路由，不自动配置）</div></div>
-            <label class="toggle"><input type="checkbox" v-model="ms.tun.enable"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
-          </div>
-          <div v-if="ms.tun.enable" class="grid-3">
+          <div class="form-hint" style="margin-bottom:12px">TUN 在 TCP 或 UDP 代理模式选择「TUN」时自动启用；以下参数在 TUN 启用时生效。</div>
+          <div class="grid-3">
             <div class="form-group" style="margin:0">
               <label class="form-label">设备名称</label>
               <input class="input" v-model="ms.tun.device" placeholder="Meta">
@@ -119,12 +116,19 @@
         <!-- ── Sniffer ────────────────────────────────────── -->
         <div class="card">
           <div class="card-title">域名嗅探 (Sniffer)</div>
-          <div class="toggle-row" style="border:none;padding:0">
+          <div class="toggle-row" style="border:none;padding:0;margin-bottom:8px">
             <div>
               <div class="toggle-label">启用域名嗅探</div>
-              <div class="toggle-desc">对 HTTP / TLS / QUIC 流量自动嗅探域名，覆盖 IP 目标</div>
+              <div class="toggle-desc">对 HTTP / TLS / QUIC 流量自动嗅探域名</div>
             </div>
             <label class="toggle"><input type="checkbox" v-model="ms.sniffer.enable"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+          </div>
+          <div v-if="ms.sniffer.enable" class="toggle-row" style="border:none;padding:0">
+            <div>
+              <div class="toggle-label">覆盖 IP 目标</div>
+              <div class="toggle-desc">嗅探到域名后用域名覆盖原始 IP 目标（override-destination）</div>
+            </div>
+            <label class="toggle"><input type="checkbox" v-model="ms.sniffer.overrideDestination"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
           </div>
         </div>
 
@@ -317,8 +321,8 @@ const udpModes = [
 // Meta settings
 const ms = reactive({
   inbound: { mixedPort: 7890, redirectPort: 7892, tproxyPort: 7893, dnsPort: 1053 },
-  tun: { enable: false, device: 'Meta', stack: 'mixed', mtu: 1500 },
-  sniffer: { enable: true },
+  tun: { device: 'Meta', stack: 'mixed', mtu: 1500 },
+  sniffer: { enable: true, overrideDestination: true },
   log: { level: 'warning' },
   clashAPI: { listen: '0.0.0.0:9090', secret: '', ui: '', uiURL: '' },
   misc: { findProcessMode: 'off', unifiedDelay: true, tcpConcurrent: true },

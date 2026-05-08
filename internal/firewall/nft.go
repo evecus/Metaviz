@@ -134,10 +134,10 @@ func setupTunRoutes(ipv6 bool, tunDevice string) error {
 // are silently skipped because the set type is ipv4_addr and mixing them
 // would cause nft to error out and leave the machine unprotected.
 func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSnippet string) {
-	if ipf.Mode == ipfilter.ModeOff || !lanProxy || strings.TrimSpace(ipf.IPs) == "" {
+	if ipf.Mode == ipfilter.ModeOff || !lanProxy || len(ipf.IPs) == 0 {
 		return "", ""
 	}
-	parts := strings.Fields(ipf.IPs)
+	parts := ipf.IPs
 	var elems []string
 	for _, p := range parts {
 		if strings.Contains(p, "/") {

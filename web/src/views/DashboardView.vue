@@ -129,7 +129,7 @@
           </div>
 
           <!-- Log card -->
-          <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
+          <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:420px">
             <div style="padding:14px 16px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
               <span class="card-title" style="margin:0">实时日志</span>
               <div v-if="isRunning" style="display:flex;align-items:center;gap:5px;margin-left:8px">
@@ -138,7 +138,7 @@
               </div>
               <button class="btn btn-secondary btn-sm" style="margin-left:auto" @click="logsStore.clear()">清空</button>
             </div>
-            <div class="log-box" style="flex:1;border-radius:0;height:auto;min-height:220px" ref="logEl">
+            <div class="log-box" style="flex:1;border-radius:0;height:300px;max-height:300px;overflow-y:auto;min-height:0" ref="logEl">
               <div v-if="!logsStore.lines.length" class="log-line" style="opacity:.4">等待日志…</div>
               <div v-for="(l,i) in logsStore.lines.slice(-120)" :key="i" class="log-line" :class="logCls(l)">{{ l }}</div>
             </div>

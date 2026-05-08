@@ -30,7 +30,8 @@ type GlobalConfig struct {
 	TunDevice    string
 	TunStack     string
 	TunMTU       int
-	SnifferEnable bool
+	SnifferEnable              bool
+	SnifferOverrideDestination bool
 	ClashAPIListen string
 	ClashAPISecret string
 	ClashAPIUI     string
@@ -134,7 +135,7 @@ func PatchUploadConfig(src []byte, global GlobalConfig) ([]byte, error) {
 	cfg["tun"] = buildTun(global)
 
 	// Sniffer（整块覆盖）
-	cfg["sniffer"] = buildSniffer(global.SnifferEnable)
+	cfg["sniffer"] = buildSniffer(global.SnifferEnable, global.SnifferOverrideDestination)
 
 	// DNS：只覆盖 listen 端口
 	if dns, ok := cfg["dns"].(map[string]interface{}); ok {
@@ -161,7 +162,7 @@ func buildBase(g GlobalConfig) map[string]interface{} {
 		"find-process-mode": g.FindProcessMode,
 		"geodata-mode":     false,
 		"tun":              buildTun(g),
-		"sniffer":          buildSniffer(g.SnifferEnable),
+		"sniffer":          buildSniffer(g.SnifferEnable, g.SnifferOverrideDestination),
 	}
 	if g.ClashAPIListen != "" {
 		cfg["external-controller"] = g.ClashAPIListen
@@ -187,19 +188,21 @@ func buildTun(g GlobalConfig) M {
 	}
 }
 
-func buildSniffer(enable bool) M {
+func buildSniffer(enable, overrideDestination bool) M {
 	return M{
 		"enable": enable,
 		"sniff": M{
 			"HTTP": M{
 				"ports":                []int{80, 8080, 8880, 2052, 2082, 2086, 2095},
-				"override-destination": true,
+				"override-destination": overrideDestination,
 			},
 			"TLS": M{
-				"ports": []int{443, 8443, 2053, 2083, 2087, 2096},
+				"ports":                []int{443, 8443, 2053, 2083, 2087, 2096},
+				"override-destination": overrideDestination,
 			},
 			"QUIC": M{
-				"ports": []int{443, 8443},
+				"ports":                []int{443, 8443},
+				"override-destination": overrideDestination,
 			},
 		},
 	}
@@ -295,9 +298,11 @@ func buildRules(mode RouteMode, proxyName string, blockAds bool) []string {
 
 	case RouteModeGFWList:
 		rules = append(rules,
+			fmt.Sprintf("IP-CIDR,1.1.1.1/32,%s,no-resolve", proxyName),
+			fmt.Sprintf("IP-CIDR,8.8.8.8/32,%s,no-resolve", proxyName),
 			fmt.Sprintf("RULE-SET,geosite-gfw,%s", proxyName),
 			fmt.Sprintf("RULE-SET,geosite-geolocation-!cn,%s", proxyName),
-			fmt.Sprintf("RULE-SET,geoip-telegram,%s", proxyName),
+			fmt.Sprintf("RULE-SET,geoip-telegram,%s,no-resolve", proxyName),
 			"MATCH,DIRECT",
 		)
 
