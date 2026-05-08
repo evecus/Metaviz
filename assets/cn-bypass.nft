@@ -1,7 +1,7 @@
 # China mainland IP bypass set for singa nftables
 # Auto-generated — do not edit manually
 
-table inet metaviz {
+table inet metaviz_cnbypass {
     set cn_bypass {
         type ipv4_addr
         flags interval
