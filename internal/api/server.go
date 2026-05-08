@@ -40,17 +40,17 @@ var errorOnlyFormatter gin.LogFormatter = func(param gin.LogFormatterParams) str
 type Server struct {
 	manager       *core.Manager
 	dataDir       string
-	srsDir        string
+	mrsDir        string
 	webFS         embed.FS
 	sessionMu     sync.RWMutex
 	sessionTokens map[string]bool
 }
 
-func NewServer(m *core.Manager, dataDir, srsDir string, webFS embed.FS) *Server {
+func NewServer(m *core.Manager, dataDir, mrsDir string, webFS embed.FS) *Server {
 	return &Server{
 		manager:       m,
 		dataDir:       dataDir,
-		srsDir:        srsDir,
+		mrsDir:        mrsDir,
 		webFS:         webFS,
 		sessionTokens: map[string]bool{},
 	}
@@ -411,7 +411,7 @@ func (s *Server) updateRules(c *gin.Context) {
 		Proxy string `json:"proxy"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	results := updater.UpdateAll(s.srsDir, req.Proxy)
+	results := updater.UpdateAll(s.mrsDir, req.Proxy)
 	failed := 0
 	for _, r := range results {
 		if r.Error != "" {
@@ -434,7 +434,7 @@ func (s *Server) listRulesets(c *gin.Context) {
 		UpdatedAt time.Time `json:"updatedAt"`
 	}
 	var items []entry
-	dirEntries, err := os.ReadDir(s.srsDir)
+	dirEntries, err := os.ReadDir(s.mrsDir)
 	if err != nil {
 		c.JSON(200, []entry{})
 		return
@@ -461,7 +461,7 @@ func (s *Server) deleteRuleset(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid file name"})
 		return
 	}
-	if err := os.Remove(filepath.Join(s.srsDir, name)); err != nil {
+	if err := os.Remove(filepath.Join(s.mrsDir, name)); err != nil {
 		c.JSON(404, gin.H{"error": err.Error()})
 		return
 	}

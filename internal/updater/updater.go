@@ -26,11 +26,11 @@ var mrsFiles = map[string]string{
 	"ads.mrs":                       "https://raw.githubusercontent.com/evecus/ruleset/refs/heads/master/mihomo/ads.mrs",
 }
 
-// UpdateAll downloads all known mrs files to srsDir.
-func UpdateAll(srsDir, proxy string) []Result {
+// UpdateAll downloads all known mrs files to mrsDir.
+func UpdateAll(mrsDir, proxy string) []Result {
 	results := make([]Result, 0, len(mrsFiles))
 	for file, url := range mrsFiles {
-		err := downloadTo(url, filepath.Join(srsDir, file), proxy)
+		err := downloadTo(url, filepath.Join(mrsDir, file), proxy)
 		r := Result{File: file, OK: err == nil}
 		if err != nil {
 			r.Error = err.Error()
@@ -46,7 +46,7 @@ type FileSpec struct {
 	URL  string // if empty, falls back to built-in URL
 }
 
-func UpdateFiles(srsDir, proxy string, specs []FileSpec) []Result {
+func UpdateFiles(mrsDir, proxy string, specs []FileSpec) []Result {
 	results := make([]Result, 0, len(specs))
 	for _, spec := range specs {
 		url := spec.URL
@@ -57,7 +57,7 @@ func UpdateFiles(srsDir, proxy string, specs []FileSpec) []Result {
 			results = append(results, Result{File: spec.File, OK: false, Error: "unknown file, no URL"})
 			continue
 		}
-		err := downloadTo(url, filepath.Join(srsDir, spec.File), proxy)
+		err := downloadTo(url, filepath.Join(mrsDir, spec.File), proxy)
 		r := Result{File: spec.File, OK: err == nil}
 		if err != nil {
 			r.Error = err.Error()

@@ -40,7 +40,7 @@ type GlobalConfig struct {
 }
 
 // BuildNodeConfig 生成单节点模式的完整 mihomo YAML。
-func BuildNodeConfig(routeMode RouteMode, n *node.Node, srsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
+func BuildNodeConfig(routeMode RouteMode, n *node.Node, mrsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
 	proxy, err := NodeToProxy(n)
 	if err != nil {
 		return nil, fmt.Errorf("convert node: %w", err)
@@ -49,7 +49,7 @@ func BuildNodeConfig(routeMode RouteMode, n *node.Node, srsDir string, blockAds 
 	cfg := buildBase(global)
 	cfg["proxies"] = []interface{}{proxy}
 	cfg["proxy-groups"] = []interface{}{}
-	cfg["rule-providers"] = buildRuleProviders(routeMode, srsDir, blockAds)
+	cfg["rule-providers"] = buildRuleProviders(routeMode, mrsDir, blockAds)
 	cfg["rules"] = buildRules(routeMode, n.Name, blockAds)
 	cfg["dns"] = buildDNS(routeMode, global.DNSPort, global.IPv6)
 
@@ -57,7 +57,7 @@ func BuildNodeConfig(routeMode RouteMode, n *node.Node, srsDir string, blockAds 
 }
 
 // BuildSubscriptionConfig 生成订阅模式的完整 mihomo YAML。
-func BuildSubscriptionConfig(routeMode RouteMode, subID, subName, subURL, srsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
+func BuildSubscriptionConfig(routeMode RouteMode, subID, subName, subURL, mrsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
 	cfg := buildBase(global)
 
 	providerPath := fmt.Sprintf("./providers/%s.yaml", subID)
@@ -83,7 +83,7 @@ func BuildSubscriptionConfig(routeMode RouteMode, subID, subName, subURL, srsDir
 		},
 	}
 
-	cfg["rule-providers"] = buildRuleProviders(routeMode, srsDir, blockAds)
+	cfg["rule-providers"] = buildRuleProviders(routeMode, mrsDir, blockAds)
 	cfg["rules"] = buildRules(routeMode, "节点选择", blockAds)
 	cfg["dns"] = buildDNS(routeMode, global.DNSPort, global.IPv6)
 
@@ -91,8 +91,8 @@ func BuildSubscriptionConfig(routeMode RouteMode, subID, subName, subURL, srsDir
 }
 
 // BuildSubNodeConfig 生成订阅里选单个节点的配置（subnode 模式）。
-func BuildSubNodeConfig(routeMode RouteMode, n *node.Node, srsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
-	return BuildNodeConfig(routeMode, n, srsDir, blockAds, global)
+func BuildSubNodeConfig(routeMode RouteMode, n *node.Node, mrsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
+	return BuildNodeConfig(routeMode, n, mrsDir, blockAds, global)
 }
 
 // PatchUploadConfig 把全局设置字段覆盖合并进上传的配置 YAML。
@@ -246,33 +246,33 @@ func buildDNS(mode RouteMode, dnsPort int, ipv6 bool) M {
 
 // ── Rule Providers ──────────────────────────────────────────────────────────
 
-func buildRuleProviders(mode RouteMode, srsDir string, blockAds bool) M {
+func buildRuleProviders(mode RouteMode, mrsDir string, blockAds bool) M {
 	rp := M{}
 
 	switch mode {
 	case RouteModeWhitelist:
-		rp["geosite-cn"] = localRuleProvider(srsDir, "geosite-cn", "domain")
-		rp["geoip-cn"] = localRuleProvider(srsDir, "geoip-cn", "ipcidr")
+		rp["geosite-cn"] = localRuleProvider(mrsDir, "geosite-cn", "domain")
+		rp["geoip-cn"] = localRuleProvider(mrsDir, "geoip-cn", "ipcidr")
 
 	case RouteModeGFWList:
-		rp["geosite-gfw"] = localRuleProvider(srsDir, "geosite-gfw", "domain")
-		rp["geosite-geolocation-!cn"] = localRuleProvider(srsDir, "geosite-geolocation-!cn", "domain")
-		rp["geoip-telegram"] = localRuleProvider(srsDir, "geoip-telegram", "ipcidr")
+		rp["geosite-gfw"] = localRuleProvider(mrsDir, "geosite-gfw", "domain")
+		rp["geosite-geolocation-!cn"] = localRuleProvider(mrsDir, "geosite-geolocation-!cn", "domain")
+		rp["geoip-telegram"] = localRuleProvider(mrsDir, "geoip-telegram", "ipcidr")
 	}
 
 	if blockAds {
-		rp["ads"] = localRuleProvider(srsDir, "ads", "domain")
+		rp["ads"] = localRuleProvider(mrsDir, "ads", "domain")
 	}
 
 	return rp
 }
 
-func localRuleProvider(srsDir, name, behavior string) M {
+func localRuleProvider(mrsDir, name, behavior string) M {
 	return M{
 		"type":     "file",
 		"behavior": behavior,
 		"format":   "mrs",
-		"path":     fmt.Sprintf("%s/%s.mrs", srsDir, name),
+		"path":     fmt.Sprintf("./mrs/%s.mrs", name),
 	}
 }
 

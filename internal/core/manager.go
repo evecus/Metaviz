@@ -92,7 +92,7 @@ type Manager struct {
 	mu         sync.Mutex
 	dataDir    string
 	runDir     string
-	srsDir     string
+	mrsDir     string
 	configsDir string
 	providersDir string
 
@@ -126,7 +126,7 @@ type Ports struct {
 	TProxy   int `json:"tproxy"`
 }
 
-func NewManager(dataDir, runDir, srsDir string) *Manager {
+func NewManager(dataDir, runDir, mrsDir string) *Manager {
 	configsDir := filepath.Join(dataDir, "configs")
 	providersDir := filepath.Join(dataDir, "providers")
 	for _, d := range []string{configsDir, providersDir} {
@@ -142,7 +142,7 @@ func NewManager(dataDir, runDir, srsDir string) *Manager {
 	m := &Manager{
 		dataDir:      dataDir,
 		runDir:       runDir,
-		srsDir:       srsDir,
+		mrsDir:       mrsDir,
 		configsDir:   configsDir,
 		providersDir: providersDir,
 		state:        StateStopped,
@@ -346,7 +346,7 @@ func (m *Manager) Start(p StartParams) error {
 		if n == nil {
 			return fmt.Errorf("node %q not found", p.NodeID)
 		}
-		data, err := builder.BuildNodeConfig(p.RouteMode, n, m.srsDir, p.BlockAds, global)
+		data, err := builder.BuildNodeConfig(p.RouteMode, n, m.mrsDir, p.BlockAds, global)
 		if err != nil {
 			return fmt.Errorf("build config: %w", err)
 		}
@@ -369,7 +369,7 @@ func (m *Manager) Start(p StartParams) error {
 		if err != nil {
 			return fmt.Errorf("parse subscription node: %w", err)
 		}
-		data, err := builder.BuildSubNodeConfig(p.RouteMode, n, m.srsDir, p.BlockAds, global)
+		data, err := builder.BuildSubNodeConfig(p.RouteMode, n, m.mrsDir, p.BlockAds, global)
 		if err != nil {
 			return fmt.Errorf("build config: %w", err)
 		}
@@ -385,7 +385,7 @@ func (m *Manager) Start(p StartParams) error {
 			return fmt.Errorf("subscription %q not found", p.SubscriptionID)
 		}
 		data, err := builder.BuildSubscriptionConfig(
-			p.RouteMode, sub.ID, sub.Name, sub.URL, m.srsDir, p.BlockAds, global,
+			p.RouteMode, sub.ID, sub.Name, sub.URL, m.mrsDir, p.BlockAds, global,
 		)
 		if err != nil {
 			return fmt.Errorf("build config: %w", err)

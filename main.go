@@ -18,8 +18,8 @@ import (
 //go:embed web/dist
 var webFS embed.FS
 
-//go:embed assets/srs
-var srsFS embed.FS
+//go:embed assets/mrs
+var mrsFS embed.FS
 
 //go:embed assets/cn-bypass.nft
 var cnBypassNft []byte
@@ -51,18 +51,18 @@ func main() {
 	listen := fmt.Sprintf(":%d", portFlag)
 
 	runDir      := filepath.Join(dataDir, "run")
-	srsDir      := filepath.Join(dataDir, "srs")
+	mrsDir      := filepath.Join(runDir, "mrs")
 	configsDir  := filepath.Join(dataDir, "configs")
 	providersDir := filepath.Join(dataDir, "providers")
 
-	for _, d := range []string{dataDir, runDir, srsDir, configsDir, providersDir} {
+	for _, d := range []string{dataDir, runDir, mrsDir, configsDir, providersDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			log.Fatalf("mkdir %s: %v", d, err)
 		}
 	}
 
-	// 提取内嵌的 .mrs 规则集到 data/srs/（已存在则跳过）
-	if err := extractMRS(srsFS, srsDir); err != nil {
+	// 提取内嵌的 .mrs 规则集到 run/mrs/（已存在则跳过）
+	if err := extractMRS(mrsFS, mrsDir); err != nil {
 		log.Printf("warn: extract mrs: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func main() {
 		}
 	}
 
-	manager := core.NewManager(dataDir, runDir, srsDir)
+	manager := core.NewManager(dataDir, runDir, mrsDir)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
@@ -92,7 +92,7 @@ func main() {
 	manager.RecoverState()
 	manager.AutoStart()
 
-	srv := api.NewServer(manager, dataDir, srsDir, webFS)
+	srv := api.NewServer(manager, dataDir, mrsDir, webFS)
 	log.Printf("metaviz: listening on %s  data=%s", listen, dataDir)
 	if err := srv.Run(listen); err != nil {
 		log.Fatalf("server: %v", err)
@@ -101,7 +101,7 @@ func main() {
 
 // extractMRS 只提取 .mrs 文件，跳过其他文件（README 等）
 func extractMRS(efs embed.FS, dst string) error {
-	entries, err := efs.ReadDir("assets/srs")
+	entries, err := efs.ReadDir("assets/mrs")
 	if err != nil {
 		return err
 	}
@@ -113,14 +113,14 @@ func extractMRS(efs embed.FS, dst string) error {
 		if _, err := os.Stat(target); err == nil {
 			continue // 已存在，跳过
 		}
-		data, err := efs.ReadFile("assets/srs/" + e.Name())
+		data, err := efs.ReadFile("assets/mrs/" + e.Name())
 		if err != nil {
 			return err
 		}
 		if err := os.WriteFile(target, data, 0644); err != nil {
 			return err
 		}
-		log.Printf("metaviz: extracted srs/%s", e.Name())
+		log.Printf("metaviz: extracted mrs/%s", e.Name())
 	}
 	return nil
 }
