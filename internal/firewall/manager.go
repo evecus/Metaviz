@@ -33,7 +33,8 @@ type Ports struct {
 // Apply sets up nftables rules for the chosen TCP/UDP proxy modes.
 // tunDevice is the TUN interface name configured by the user (e.g. "metaviz",
 // "tun0"). It is used in both the nft iifname match and the ip route rules.
-func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, ipf ipfilter.Config) error {
+// If systemProxy is true, no nftables rules or routes are configured at all.
+func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, ipf ipfilter.Config, systemProxy bool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -46,6 +47,11 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 	activeTunDevice = tunDevice
 	activeModes = modes
 	activeIPv6 = ipv6
+
+	if systemProxy {
+		log.Println("firewall: system_proxy enabled — skipping nftables rules and routes")
+		return nil
+	}
 
 	if modes.IsSystemProxyOnly() {
 		log.Println("firewall: system_proxy only — no nftables rules")
