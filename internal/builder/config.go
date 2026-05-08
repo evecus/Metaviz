@@ -1,0 +1,343 @@
+package builder
+
+import (
+	"fmt"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/metaviz/internal/node"
+)
+
+type RouteMode string
+
+const (
+	RouteModeWhitelist RouteMode = "whitelist"
+	RouteModeGFWList   RouteMode = "gfwlist"
+	RouteModeGlobal    RouteMode = "global"
+)
+
+// GlobalConfig 是注入到每个生成/上传配置里的全局字段。
+type GlobalConfig struct {
+	MixedPort    int
+	RedirectPort int
+	TProxyPort   int
+	DNSPort      int
+	AllowLan     bool
+	IPv6         bool
+	LogLevel     string
+	TunEnable    bool
+	TunDevice    string
+	TunStack     string
+	TunMTU       int
+	SnifferEnable bool
+	ClashAPIListen string
+	ClashAPISecret string
+	ClashAPIUI     string
+	FindProcessMode string
+	UnifiedDelay    bool
+	TCPConcurrent   bool
+}
+
+// BuildNodeConfig 生成单节点模式的完整 mihomo YAML。
+func BuildNodeConfig(routeMode RouteMode, n *node.Node, srsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
+	proxy, err := NodeToProxy(n)
+	if err != nil {
+		return nil, fmt.Errorf("convert node: %w", err)
+	}
+
+	cfg := buildBase(global)
+	cfg["proxies"] = []interface{}{proxy}
+	cfg["proxy-groups"] = []interface{}{}
+	cfg["rule-providers"] = buildRuleProviders(routeMode, srsDir, blockAds)
+	cfg["rules"] = buildRules(routeMode, n.Name, blockAds)
+	cfg["dns"] = buildDNS(routeMode, global.DNSPort, global.IPv6)
+
+	return yaml.Marshal(cfg)
+}
+
+// BuildSubscriptionConfig 生成订阅模式的完整 mihomo YAML。
+func BuildSubscriptionConfig(routeMode RouteMode, subID, subName, subURL, srsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
+	cfg := buildBase(global)
+
+	providerPath := fmt.Sprintf("./providers/%s.yaml", subID)
+	cfg["proxy-providers"] = M{
+		subName: M{
+			"type":     "http",
+			"url":      subURL,
+			"interval": 86400,
+			"path":     providerPath,
+			"health-check": M{
+				"enable":   true,
+				"interval": 600,
+				"url":      "https://www.gstatic.com/generate_204",
+			},
+		},
+	}
+
+	cfg["proxy-groups"] = []interface{}{
+		M{
+			"name": "节点选择",
+			"type": "select",
+			"use":  []string{subName},
+		},
+	}
+
+	cfg["rule-providers"] = buildRuleProviders(routeMode, srsDir, blockAds)
+	cfg["rules"] = buildRules(routeMode, "节点选择", blockAds)
+	cfg["dns"] = buildDNS(routeMode, global.DNSPort, global.IPv6)
+
+	return yaml.Marshal(cfg)
+}
+
+// BuildSubNodeConfig 生成订阅里选单个节点的配置（subnode 模式）。
+func BuildSubNodeConfig(routeMode RouteMode, n *node.Node, srsDir string, blockAds bool, global GlobalConfig) ([]byte, error) {
+	return BuildNodeConfig(routeMode, n, srsDir, blockAds, global)
+}
+
+// PatchUploadConfig 把全局设置字段覆盖合并进上传的配置 YAML。
+func PatchUploadConfig(src []byte, global GlobalConfig) ([]byte, error) {
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(src, &cfg); err != nil {
+		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
+	if cfg == nil {
+		cfg = make(map[string]interface{})
+	}
+
+	// 覆盖端口与基础字段
+	cfg["mixed-port"] = global.MixedPort
+	cfg["redir-port"] = global.RedirectPort
+	cfg["tproxy-port"] = global.TProxyPort
+	cfg["allow-lan"] = global.AllowLan
+	cfg["ipv6"] = global.IPv6
+	cfg["log-level"] = global.LogLevel
+	cfg["unified-delay"] = global.UnifiedDelay
+	cfg["tcp-concurrent"] = global.TCPConcurrent
+	if global.FindProcessMode != "" {
+		cfg["find-process-mode"] = global.FindProcessMode
+	}
+	cfg["geodata-mode"] = false
+
+	// Clash API
+	if global.ClashAPIListen != "" {
+		cfg["external-controller"] = global.ClashAPIListen
+	}
+	if global.ClashAPISecret != "" {
+		cfg["secret"] = global.ClashAPISecret
+	}
+	if global.ClashAPIUI != "" {
+		cfg["external-ui"] = global.ClashAPIUI
+	}
+
+	// TUN（整块覆盖）
+	cfg["tun"] = buildTun(global)
+
+	// Sniffer（整块覆盖）
+	cfg["sniffer"] = buildSniffer(global.SnifferEnable)
+
+	// DNS：只覆盖 listen 端口
+	if dns, ok := cfg["dns"].(map[string]interface{}); ok {
+		dns["listen"] = fmt.Sprintf("0.0.0.0:%d", global.DNSPort)
+	} else {
+		// 没有 dns 字段时不注入（上传模式由用户控制 DNS）
+	}
+
+	return yaml.Marshal(cfg)
+}
+
+// ── 基础配置 ────────────────────────────────────────────────────────────────
+
+func buildBase(g GlobalConfig) map[string]interface{} {
+	cfg := map[string]interface{}{
+		"mixed-port":       g.MixedPort,
+		"redir-port":       g.RedirectPort,
+		"tproxy-port":      g.TProxyPort,
+		"allow-lan":        g.AllowLan,
+		"ipv6":             g.IPv6,
+		"log-level":        g.LogLevel,
+		"unified-delay":    g.UnifiedDelay,
+		"tcp-concurrent":   g.TCPConcurrent,
+		"find-process-mode": g.FindProcessMode,
+		"geodata-mode":     false,
+		"tun":              buildTun(g),
+		"sniffer":          buildSniffer(g.SnifferEnable),
+	}
+	if g.ClashAPIListen != "" {
+		cfg["external-controller"] = g.ClashAPIListen
+	}
+	if g.ClashAPISecret != "" {
+		cfg["secret"] = g.ClashAPISecret
+	}
+	if g.ClashAPIUI != "" {
+		cfg["external-ui"] = g.ClashAPIUI
+	}
+	return cfg
+}
+
+func buildTun(g GlobalConfig) M {
+	return M{
+		"enable":                g.TunEnable,
+		"device":                g.TunDevice,
+		"stack":                 g.TunStack,
+		"mtu":                   g.TunMTU,
+		"auto-route":            false,
+		"strict-route":          false,
+		"auto-detect-interface": false,
+	}
+}
+
+func buildSniffer(enable bool) M {
+	return M{
+		"enable": enable,
+		"sniff": M{
+			"HTTP": M{
+				"ports":                []int{80, 8080, 8880, 2052, 2082, 2086, 2095},
+				"override-destination": true,
+			},
+			"TLS": M{
+				"ports": []int{443, 8443, 2053, 2083, 2087, 2096},
+			},
+			"QUIC": M{
+				"ports": []int{443, 8443},
+			},
+		},
+	}
+}
+
+// ── DNS ─────────────────────────────────────────────────────────────────────
+
+func buildDNS(mode RouteMode, dnsPort int, ipv6 bool) M {
+	listen := fmt.Sprintf("0.0.0.0:%d", dnsPort)
+	base := M{
+		"enable":           true,
+		"cache-algorithm":  "arc",
+		"listen":           listen,
+		"ipv6":             ipv6,
+		"enhanced-mode":    "redir-host",
+		"default-nameserver": []string{"223.5.5.5"},
+		"proxy-server-nameserver": []string{"223.5.5.5"},
+	}
+
+	switch mode {
+	case RouteModeGFWList:
+		base["respect-rules"] = true
+		base["nameserver"] = []string{"223.5.5.5", "119.29.29.29"}
+		base["nameserver-policy"] = M{
+			"rule-set:geosite-gfw,geosite-geolocation-!cn": []string{
+				"tls://1.1.1.1",
+				"tls://8.8.8.8",
+			},
+		}
+
+	case RouteModeWhitelist:
+		base["respect-rules"] = true
+		base["nameserver"] = []string{"tls://1.1.1.1", "tls://8.8.8.8"}
+		base["nameserver-policy"] = M{
+			"rule-set:geosite-cn": []string{"223.5.5.5", "119.29.29.29"},
+		}
+
+	case RouteModeGlobal:
+		base["nameserver"] = []string{"tls://1.1.1.1", "tls://8.8.8.8"}
+	}
+
+	return base
+}
+
+// ── Rule Providers ──────────────────────────────────────────────────────────
+
+func buildRuleProviders(mode RouteMode, srsDir string, blockAds bool) M {
+	rp := M{}
+
+	switch mode {
+	case RouteModeWhitelist:
+		rp["geosite-cn"] = localRuleProvider(srsDir, "geosite-cn", "domain")
+		rp["geoip-cn"] = localRuleProvider(srsDir, "geoip-cn", "ipcidr")
+
+	case RouteModeGFWList:
+		rp["geosite-gfw"] = localRuleProvider(srsDir, "geosite-gfw", "domain")
+		rp["geosite-geolocation-!cn"] = localRuleProvider(srsDir, "geosite-geolocation-!cn", "domain")
+		rp["geoip-telegram"] = localRuleProvider(srsDir, "geoip-telegram", "ipcidr")
+	}
+
+	if blockAds {
+		rp["ads"] = localRuleProvider(srsDir, "ads", "domain")
+	}
+
+	return rp
+}
+
+func localRuleProvider(srsDir, name, behavior string) M {
+	return M{
+		"type":     "file",
+		"behavior": behavior,
+		"format":   "mrs",
+		"path":     fmt.Sprintf("%s/%s.mrs", srsDir, name),
+	}
+}
+
+// ── Rules ───────────────────────────────────────────────────────────────────
+
+func buildRules(mode RouteMode, proxyName string, blockAds bool) []string {
+	var rules []string
+
+	if blockAds {
+		rules = append(rules, "RULE-SET,ads,REJECT")
+	}
+
+	switch mode {
+	case RouteModeWhitelist:
+		rules = append(rules,
+			"RULE-SET,geosite-cn,DIRECT",
+			"RULE-SET,geoip-cn,DIRECT",
+			fmt.Sprintf("MATCH,%s", proxyName),
+		)
+
+	case RouteModeGFWList:
+		rules = append(rules,
+			fmt.Sprintf("RULE-SET,geosite-gfw,%s", proxyName),
+			fmt.Sprintf("RULE-SET,geosite-geolocation-!cn,%s", proxyName),
+			fmt.Sprintf("RULE-SET,geoip-telegram,%s", proxyName),
+			"MATCH,DIRECT",
+		)
+
+	case RouteModeGlobal:
+		rules = append(rules, fmt.Sprintf("MATCH,%s", proxyName))
+	}
+
+	return rules
+}
+
+// ValidateYAML checks if data is valid YAML with at least one recognizable field.
+func ValidateYAML(data []byte) error {
+	var m map[string]interface{}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("invalid YAML: %w", err)
+	}
+	if len(m) == 0 {
+		return fmt.Errorf("empty config")
+	}
+	return nil
+}
+
+// SummarizeInbounds extracts inbound-like info from a mihomo YAML for display.
+func SummarizeInbounds(data []byte) []map[string]interface{} {
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+	var result []map[string]interface{}
+	for _, key := range []string{"mixed-port", "redir-port", "tproxy-port", "socks-port", "port"} {
+		if v, ok := cfg[key]; ok {
+			result = append(result, map[string]interface{}{"type": key, "port": v})
+		}
+	}
+	if tun, ok := cfg["tun"].(map[string]interface{}); ok {
+		if enabled, _ := tun["enable"].(bool); enabled {
+			result = append(result, map[string]interface{}{"type": "tun", "device": tun["device"]})
+		}
+	}
+	return result
+}
+
+var _ = strings.Join // keep import

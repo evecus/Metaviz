@@ -1,0 +1,532 @@
+package firewall
+
+import (
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/metaviz/internal/config"
+	"github.com/metaviz/internal/ipfilter"
+)
+
+var nftConfPath string
+
+func SetNftConfPath(dir string) {
+	nftConfPath = filepath.Join(dir, "metaviz-nft.conf")
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const (
+	tunFwMark = "0x41"
+	tunFwMask = "0xc1"
+	tunTable  = 101
+)
+
+// privateRangesV4 covers fib-type addresses and all RFC-reserved IPv4 ranges.
+// Used identically in proxy_rule and tcp_redirect so the two chains are consistent.
+const privateRangesV4 = "" +
+	"        fib daddr type { local, broadcast, anycast, multicast } return\n" +
+	"        ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, " +
+	"169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, " +
+	"192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return\n"
+
+// privateRangesV6 covers all RFC-reserved IPv6 ranges.
+// Used in proxy_rule (IPv6 traffic) and tcp_redirect (when IPv6 is enabled).
+const privateRangesV6 = "" +
+	"        ip6 daddr { ::/127, fc00::/7, fe80::/10, ff00::/8 } return\n"
+
+// ── Entry point ────────────────────────────────────────────────────────────
+
+func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config) error {
+	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf)
+	if err := os.WriteFile(nftConfPath, []byte(conf), 0644); err != nil {
+		return fmt.Errorf("write nft conf: %w", err)
+	}
+	if err := setupRoutes(modes, ipv6, tunDevice); err != nil {
+		return err
+	}
+	if lanProxy {
+		if err := enableIPForward(ipv6); err != nil {
+			log.Printf("firewall: ip_forward: %v", err)
+		}
+	}
+	if err := runCmd("nft -f " + nftConfPath); err != nil {
+		return err
+	}
+	if bypassCN {
+		cnNftPath := filepath.Join(filepath.Dir(nftConfPath), "cn-bypass.nft")
+		if _, err := os.Stat(cnNftPath); err == nil {
+			if err := runCmd("nft -f " + cnNftPath); err != nil {
+				log.Printf("firewall: cn-bypass load: %v", err)
+			} else {
+				log.Println("firewall: CN bypass rules loaded")
+			}
+		} else {
+			log.Printf("firewall: cn-bypass.nft not found at %s", cnNftPath)
+		}
+	}
+	return nil
+}
+
+// setupRoutes installs ip rule / ip route entries for the active modes.
+// Only installs routes for modes that are actually in use.
+func setupRoutes(modes config.ProxyModes, ipv6 bool, tunDevice string) error {
+	if modes.NeedsTProxyInbound() {
+		if err := setupTProxyRoutes(ipv6); err != nil {
+			return err
+		}
+	}
+	if modes.NeedsTunInbound() {
+		if err := setupTunRoutes(ipv6, tunDevice); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setupTProxyRoutes(ipv6 bool) error {
+	cmds := []string{
+		"ip rule add fwmark 0x40/0xc0 table 100",
+		"ip route add local 0.0.0.0/0 dev lo table 100",
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			"ip -6 rule add fwmark 0x40/0xc0 table 100",
+			"ip -6 route add local ::/0 dev lo table 100",
+		)
+	}
+	for _, c := range cmds {
+		if err := runCmd(c); err != nil {
+			log.Printf("firewall: tproxy route: %v", err)
+		}
+	}
+	return nil
+}
+
+func setupTunRoutes(ipv6 bool, tunDevice string) error {
+	cmds := []string{
+		fmt.Sprintf("ip rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
+		fmt.Sprintf("ip route add default dev %s table %d", tunDevice, tunTable),
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			fmt.Sprintf("ip -6 rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
+			fmt.Sprintf("ip -6 route add default dev %s table %d", tunDevice, tunTable),
+		)
+	}
+	for _, c := range cmds {
+		if err := runCmd(c); err != nil {
+			log.Printf("firewall: tun route: %v", err)
+		}
+	}
+	return nil
+}
+
+// ── IP filter set ──────────────────────────────────────────────────────────
+
+// buildIPFilterNft builds the nft set definition and rule snippet for the
+// IP filter feature.  Only IPv4 addresses/CIDRs are accepted; IPv6 entries
+// are silently skipped because the set type is ipv4_addr and mixing them
+// would cause nft to error out and leave the machine unprotected.
+func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSnippet string) {
+	if ipf.Mode == ipfilter.ModeOff || !lanProxy || strings.TrimSpace(ipf.IPs) == "" {
+		return "", ""
+	}
+	parts := strings.Fields(ipf.IPs)
+	var elems []string
+	for _, p := range parts {
+		if strings.Contains(p, "/") {
+			// CIDR — parse and verify it is IPv4
+			ip, _, err := net.ParseCIDR(p)
+			if err != nil {
+				continue
+			}
+			if ip.To4() == nil {
+				// IPv6 CIDR — skip; adding to an ipv4_addr set causes nft error
+				log.Printf("firewall: ip_filter: skipping IPv6 CIDR %s (only IPv4 supported)", p)
+				continue
+			}
+			elems = append(elems, p)
+		} else {
+			ip := net.ParseIP(p)
+			if ip == nil {
+				continue
+			}
+			if ip.To4() == nil {
+				// IPv6 address — skip for the same reason
+				log.Printf("firewall: ip_filter: skipping IPv6 address %s (only IPv4 supported)", p)
+				continue
+			}
+			elems = append(elems, p)
+		}
+	}
+	if len(elems) == 0 {
+		return "", ""
+	}
+	setDef = fmt.Sprintf(
+		"    set ip_filter {\n        type ipv4_addr\n        flags interval\n        auto-merge\n        elements = { %s }\n    }\n",
+		strings.Join(elems, ", "),
+	)
+	switch ipf.Mode {
+	case ipfilter.ModeBlacklist:
+		ruleSnippet = "        ip saddr @ip_filter return\n"
+	case ipfilter.ModeWhitelist:
+		ruleSnippet = "        ip saddr != @ip_filter return\n"
+	}
+	return setDef, ruleSnippet
+}
+
+// ── Main table builder ─────────────────────────────────────────────────────
+
+func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config) string {
+	ipfSetDef, ipfRule := buildIPFilterNft(ipf, lanProxy)
+	var s strings.Builder
+
+	s.WriteString("table inet metaviz {\n")
+
+	// interface set is always present (populated by SyncLocalIPs after nft -f).
+	s.WriteString("    set interface {\n        type ipv4_addr\n        flags interval\n        auto-merge\n    }\n")
+	// interface6 is only defined when IPv6 is enabled so it is actually used.
+	if ipv6 {
+		s.WriteString("    set interface6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
+	}
+
+	if ipfSetDef != "" {
+		s.WriteString(ipfSetDef)
+	}
+
+	if modes.NeedsTProxyInbound() {
+		s.WriteString(`
+    chain tp_mark {
+        tcp flags & (fin | syn | rst | ack) == syn meta mark set mark | 0x40
+        meta l4proto udp ct state new meta mark set mark | 0x40
+        ct mark set mark
+    }
+`)
+	}
+	if modes.NeedsTunInbound() {
+		s.WriteString(fmt.Sprintf(`
+    chain tun_mark {
+        meta mark set meta mark | %s
+        ct mark set meta mark
+    }
+`, tunFwMark))
+	}
+
+	s.WriteString(buildProxyRuleChain(modes, ipfRule, ipv6, bypassCN))
+	s.WriteString(buildManglePrerouting(modes, ports, lanProxy, ipv6, tunDevice))
+	s.WriteString(buildMangleOutput(modes, ipv6, gid))
+
+	s.WriteString(`
+    chain prerouting_mangle {
+        type filter hook prerouting priority mangle - 5; policy accept;
+        jump proxy_pre
+    }
+
+    chain output_mangle {
+        type route hook output priority mangle - 5; policy accept;
+        jump proxy_out
+    }
+`)
+
+	s.WriteString(buildNATChains(modes, ports, ipv6, gid))
+	s.WriteString("}\n")
+	return s.String()
+}
+
+// ── proxy_rule chain ───────────────────────────────────────────────────────
+
+func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, bypassCN bool) string {
+	var s strings.Builder
+	s.WriteString("\n    chain proxy_rule {\n")
+
+	if modes.NeedsTProxyInbound() {
+		s.WriteString("        meta mark set ct mark\n")
+		s.WriteString("        meta mark & 0xc0 == 0x40 return\n")
+	}
+	if modes.NeedsTunInbound() {
+		s.WriteString("        meta mark set ct mark\n")
+		s.WriteString(fmt.Sprintf("        meta mark & %s == %s return\n", tunFwMask, tunFwMark))
+	}
+
+	s.WriteString(privateRangesV4)
+	if ipv6 {
+		s.WriteString(privateRangesV6)
+	}
+	s.WriteString("        ip daddr @interface return\n")
+	if ipv6 {
+		s.WriteString("        ip6 daddr @interface6 return\n")
+	}
+	s.WriteString("        meta l4proto { tcp, udp } th dport 53 return\n")
+
+	if ipfRule != "" {
+		s.WriteString(ipfRule)
+	}
+
+	if bypassCN {
+		s.WriteString("        ip daddr @cn_bypass return\n")
+		if ipv6 {
+			s.WriteString("        ip6 daddr @cn_bypass6 return\n")
+		}
+	}
+
+	switch modes.TCP {
+	case config.TCPModeTProxy:
+		s.WriteString("        meta l4proto tcp jump tp_mark\n")
+	case config.TCPModeTun:
+		s.WriteString("        meta l4proto tcp jump tun_mark\n")
+	}
+
+	switch modes.UDP {
+	case config.UDPModeTProxy:
+		s.WriteString("        meta l4proto udp jump tp_mark\n")
+	case config.UDPModeTun:
+		s.WriteString("        meta l4proto udp jump tun_mark\n")
+	}
+
+	s.WriteString("    }\n")
+	return s.String()
+}
+
+// ── Mangle prerouting chain ────────────────────────────────────────────────
+
+func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, tunDevice string) string {
+	var s strings.Builder
+	s.WriteString("\n    chain proxy_pre {\n")
+
+	// Early-return: skip traffic that originates from the proxy itself.
+	if modes.NeedsTunInbound() {
+		s.WriteString(fmt.Sprintf("        iifname \"%s\" return\n", tunDevice))
+	}
+	if modes.NeedsTProxyInbound() {
+		s.WriteString("        iifname \"lo\" mark & 0xc0 != 0x40 return\n")
+	}
+
+	// LAN proxy: intercept forwarded traffic (non-local src AND non-local dst).
+	// Without lanProxy this chain only handles the tproxy redirect below, which
+	// acts on packets already marked by proxy_out (output hook, local traffic).
+	if lanProxy {
+		if ipv6 {
+			s.WriteString("        meta nfproto { ipv4, ipv6 } meta l4proto { tcp, udp } fib saddr type != local fib daddr type != local jump proxy_rule\n")
+		} else {
+			s.WriteString("        meta nfproto ipv4 meta l4proto { tcp, udp } fib saddr type != local fib daddr type != local jump proxy_rule\n")
+		}
+	}
+
+	// Redirect marked packets to the tproxy inbound.
+	if modes.NeedsTProxyInbound() {
+		s.WriteString(fmt.Sprintf("        meta nfproto ipv4 meta l4proto { tcp, udp } mark & 0xc0 == 0x40 tproxy ip to 127.0.0.1:%d\n", ports.TProxy))
+		if ipv6 {
+			s.WriteString(fmt.Sprintf("        meta nfproto ipv6 meta l4proto { tcp, udp } mark & 0xc0 == 0x40 tproxy ip6 to [::1]:%d\n", ports.TProxy))
+		}
+	}
+
+	s.WriteString("    }\n")
+	return s.String()
+}
+
+// ── Mangle output chain ────────────────────────────────────────────────────
+
+func buildMangleOutput(modes config.ProxyModes, ipv6 bool, gid uint32) string {
+	var s strings.Builder
+	s.WriteString("\n    chain proxy_out {\n")
+	s.WriteString(fmt.Sprintf("        skgid %d return\n", gid))
+	nfproto := "meta nfproto ipv4"
+	if ipv6 {
+		nfproto = "meta nfproto { ipv4, ipv6 }"
+	}
+	s.WriteString(fmt.Sprintf("        %s meta l4proto { tcp, udp } fib saddr type local fib daddr type != local jump proxy_rule\n", nfproto))
+	s.WriteString("    }\n")
+	return s.String()
+}
+
+// ── NAT chains ─────────────────────────────────────────────────────────────
+
+func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32) string {
+	var s strings.Builder
+
+	dnsV4 := fmt.Sprintf("        ip daddr != 127.0.0.1 meta l4proto { tcp, udp } th dport 53 redirect to :%d\n", ports.DNS)
+	dnsV6 := ""
+	if ipv6 {
+		dnsV6 = fmt.Sprintf("        ip6 daddr != ::1 meta l4proto { tcp, udp } th dport 53 redirect to :%d\n", ports.DNS)
+	}
+	s.WriteString(fmt.Sprintf(`
+    chain dns_redirect {
+        skgid %d return
+        meta l4proto { tcp, udp } th dport %d return
+%s%s    }
+`, gid, ports.DNS, dnsV4, dnsV6))
+
+	if modes.TCP == config.TCPModeRedir {
+		// tcp_redirect uses the shared privateRangesV4 constant so it stays in
+		// sync with proxy_rule.  When IPv6 is enabled, privateRangesV6 is also
+		// added so we don't accidentally redirect link-local / ULA TCP traffic.
+		nfproto := "meta nfproto ipv4"
+		if ipv6 {
+			nfproto = "meta nfproto { ipv4, ipv6 }"
+		}
+		ipv6Ranges := ""
+		if ipv6 {
+			ipv6Ranges = privateRangesV6
+		}
+		s.WriteString(fmt.Sprintf(`
+    chain tcp_redirect {
+        skgid %d return
+%s%s        ip daddr @interface return
+        %s meta l4proto tcp redirect to :%d
+    }
+`, gid, privateRangesV4, ipv6Ranges, nfproto, ports.Redirect))
+	}
+
+	s.WriteString("\n    chain prerouting_nat {\n")
+	s.WriteString("        type nat hook prerouting priority dstnat - 5; policy accept;\n")
+	s.WriteString("        jump dns_redirect\n")
+	if modes.TCP == config.TCPModeRedir {
+		s.WriteString("        jump tcp_redirect\n")
+	}
+	s.WriteString("    }\n")
+
+	s.WriteString("\n    chain output_nat {\n")
+	s.WriteString("        type nat hook output priority -105; policy accept;\n")
+	s.WriteString("        jump dns_redirect\n")
+	if modes.TCP == config.TCPModeRedir {
+		s.WriteString("        jump tcp_redirect\n")
+	}
+	s.WriteString("    }\n")
+
+	return s.String()
+}
+
+// ── Cleanup ────────────────────────────────────────────────────────────────
+
+// cleanup tears down only the nft table and ip routes that were actually
+// installed for the given modes.  Passing the modes used at Apply() time
+// avoids spurious "ip rule del" errors when those routes were never added.
+func cleanup(modes config.ProxyModes, ipv6 bool, tunDevice string) {
+	_ = runCmd("nft delete table inet metaviz")
+
+	if modes.NeedsTProxyInbound() {
+		cleanupTProxyRoutes(ipv6)
+	}
+	if modes.NeedsTunInbound() {
+		cleanupTunRoutes(ipv6, tunDevice)
+	}
+
+	if nftConfPath != "" {
+		_ = os.Remove(nftConfPath)
+	}
+}
+
+func cleanupTProxyRoutes(ipv6 bool) {
+	cmds := []string{
+		"ip rule del fwmark 0x40/0xc0 table 100",
+		"ip route del local 0.0.0.0/0 dev lo table 100",
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			"ip -6 rule del fwmark 0x40/0xc0 table 100",
+			"ip -6 route del local ::/0 dev lo table 100",
+		)
+	}
+	for _, c := range cmds {
+		_ = runCmd(c)
+	}
+}
+
+func cleanupTunRoutes(ipv6 bool, tunDevice string) {
+	if tunDevice == "" {
+		tunDevice = "metaviz"
+	}
+	cmds := []string{
+		fmt.Sprintf("ip rule del fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
+		fmt.Sprintf("ip route del default dev %s table %d", tunDevice, tunTable),
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			fmt.Sprintf("ip -6 rule del fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
+			fmt.Sprintf("ip -6 route del default dev %s table %d", tunDevice, tunTable),
+		)
+	}
+	for _, c := range cmds {
+		_ = runCmd(c)
+	}
+}
+
+// ── Interface IP management ────────────────────────────────────────────────
+
+func AddInterfaceIP(cidr string) {
+	set := "interface"
+	if !strings.Contains(cidr, ".") {
+		// interface6 set is only created in the nft table when IPv6 is enabled.
+		// Skip silently if IPv6 was not enabled to avoid "No such file or directory" errors.
+		if !activeIPv6 {
+			return
+		}
+		set = "interface6"
+	}
+	if err := runCmd(fmt.Sprintf("nft add element inet metaviz %s { %s }", set, cidr)); err != nil {
+		log.Printf("firewall: add %s: %v", cidr, err)
+	}
+}
+
+func RemoveInterfaceIP(cidr string) {
+	set := "interface"
+	if !strings.Contains(cidr, ".") {
+		// interface6 set is only created in the nft table when IPv6 is enabled.
+		// Skip silently if IPv6 was not enabled to avoid "No such file or directory" errors.
+		if !activeIPv6 {
+			return
+		}
+		set = "interface6"
+	}
+	if err := runCmd(fmt.Sprintf("nft delete element inet metaviz %s { %s }", set, cidr)); err != nil {
+		log.Printf("firewall: remove %s: %v", cidr, err)
+	}
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+func enableIPForward(ipv6 bool) error {
+	if err := runCmd("sysctl -w net.ipv4.ip_forward=1"); err != nil {
+		return err
+	}
+	if ipv6 {
+		return runCmd("sysctl -w net.ipv6.conf.all.forwarding=1")
+	}
+	return nil
+}
+
+func runCmd(command string) error {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return nil
+	}
+	out, err := exec.Command(parts[0], parts[1:]...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w (output: %s)", command, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func IsIPv6Supported() bool {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, iface := range ifaces {
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				if ipnet.IP.IsLoopback() && ipnet.IP.To4() == nil {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
