@@ -787,6 +787,7 @@ func (m *Manager) RecoverState() {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 func metaSettingsToGlobal(ms MetaSettings, ps ProxySettings) builder.GlobalConfig {
+	modes := ps.toProxyModes()
 	return builder.GlobalConfig{
 		MixedPort:       ms.Inbound.MixedPort,
 		RedirectPort:    ms.Inbound.RedirectPort,
