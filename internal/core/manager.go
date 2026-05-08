@@ -72,9 +72,6 @@ type ProxySettings struct {
 }
 
 func (ps ProxySettings) toProxyModes() config.ProxyModes {
-	if ps.SystemProxy {
-		return config.ProxyModes{TCP: config.TCPModeOff, UDP: config.UDPModeOff}
-	}
 	tcp := ps.TCPMode
 	if tcp == "" {
 		tcp = config.TCPModeRedir
@@ -414,7 +411,7 @@ func (m *Manager) Start(p StartParams) error {
 	if tunDevice == "" {
 		tunDevice = "Meta"
 	}
-	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, tunDevice, m.dataDir, gid, ipf); err != nil {
+	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, tunDevice, m.dataDir, gid, ipf, ps.SystemProxy); err != nil {
 		return fmt.Errorf("firewall: %w", err)
 	}
 
@@ -796,7 +793,7 @@ func metaSettingsToGlobal(ms MetaSettings, ps ProxySettings) builder.GlobalConfi
 		AllowLan:        ps.LanProxy,
 		IPv6:            ps.IPv6,
 		LogLevel:        ms.Log.Level,
-		TunEnable:                  ms.Tun.Enable || modes.NeedsTunInbound(),
+		TunEnable:                  !ps.SystemProxy && (ms.Tun.Enable || modes.NeedsTunInbound()),
 		TunDevice:                  ms.Tun.Device,
 		TunStack:                   ms.Tun.Stack,
 		TunMTU:                     ms.Tun.MTU,
