@@ -19,7 +19,7 @@ jobs:
 
       - name: Download mrs rule sets
         run: |
-          mkdir -p assets/srs
+          mkdir -p assets/mrs
           BASE_GEOSITE="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite"
           BASE_GEOIP="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geoip"
 
