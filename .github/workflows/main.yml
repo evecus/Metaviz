@@ -23,13 +23,13 @@ jobs:
           BASE_GEOSITE="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite"
           BASE_GEOIP="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geoip"
 
-          curl -fsSL "${BASE_GEOSITE}/cn.mrs"              -o assets/srs/geosite-cn.mrs
-          curl -fsSL "${BASE_GEOSITE}/gfw.mrs"             -o assets/srs/geosite-gfw.mrs
-          curl -fsSL "${BASE_GEOSITE}/geolocation-!cn.mrs" -o "assets/srs/geosite-geolocation-!cn.mrs"
-          curl -fsSL "${BASE_GEOIP}/cn.mrs"                -o assets/srs/geoip-cn.mrs
-          curl -fsSL "${BASE_GEOIP}/telegram.mrs"          -o assets/srs/geoip-telegram.mrs
+          curl -fsSL "${BASE_GEOSITE}/cn.mrs"              -o assets/mrs/geosite-cn.mrs
+          curl -fsSL "${BASE_GEOSITE}/gfw.mrs"             -o assets/mrs/geosite-gfw.mrs
+          curl -fsSL "${BASE_GEOSITE}/geolocation-!cn.mrs" -o "assets/mrs/geosite-geolocation-!cn.mrs"
+          curl -fsSL "${BASE_GEOIP}/cn.mrs"                -o assets/mrs/geoip-cn.mrs
+          curl -fsSL "${BASE_GEOIP}/telegram.mrs"          -o assets/mrs/geoip-telegram.mrs
           curl -fsSL "https://raw.githubusercontent.com/evecus/ruleset/refs/heads/master/mihomo/ads.mrs" \
-                                                            -o assets/srs/ads.mrs
+                                                            -o assets/mrs/ads.mrs
 
           echo "=== Rule set sizes ==="
           for f in assets/srs/*.mrs; do
