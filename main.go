@@ -30,7 +30,7 @@ func main() {
 		portFlag int
 	)
 	flag.StringVar(&dirFlag, "dir", "", "data directory (default: <exe-dir>/data)")
-	flag.IntVar(&portFlag, "port", 7777, "web UI port")
+	flag.IntVar(&portFlag, "port", 8080, "web UI port")
 	flag.Parse()
 
 	exe, err := os.Executable()
