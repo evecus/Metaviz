@@ -284,12 +284,11 @@ func localRuleProvider(mrsDir, name, behavior string) M {
 func buildRules(mode RouteMode, proxyName string, blockAds bool) []string {
 	var rules []string
 
-	if blockAds {
-		rules = append(rules, "RULE-SET,ads,REJECT")
-	}
-
 	switch mode {
 	case RouteModeWhitelist:
+		if blockAds {
+			rules = append(rules, "RULE-SET,ads,REJECT")
+		}
 		rules = append(rules,
 			"RULE-SET,geosite-cn,DIRECT",
 			"RULE-SET,geoip-cn,DIRECT",
@@ -300,6 +299,11 @@ func buildRules(mode RouteMode, proxyName string, blockAds bool) []string {
 		rules = append(rules,
 			fmt.Sprintf("IP-CIDR,1.1.1.1/32,%s,no-resolve", proxyName),
 			fmt.Sprintf("IP-CIDR,8.8.8.8/32,%s,no-resolve", proxyName),
+		)
+		if blockAds {
+			rules = append(rules, "RULE-SET,ads,REJECT")
+		}
+		rules = append(rules,
 			fmt.Sprintf("RULE-SET,geosite-gfw,%s", proxyName),
 			fmt.Sprintf("RULE-SET,geosite-geolocation-!cn,%s", proxyName),
 			fmt.Sprintf("RULE-SET,geoip-telegram,%s,no-resolve", proxyName),
@@ -307,6 +311,9 @@ func buildRules(mode RouteMode, proxyName string, blockAds bool) []string {
 		)
 
 	case RouteModeGlobal:
+		if blockAds {
+			rules = append(rules, "RULE-SET,ads,REJECT")
+		}
 		rules = append(rules, fmt.Sprintf("MATCH,%s", proxyName))
 	}
 
