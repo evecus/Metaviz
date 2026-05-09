@@ -24,6 +24,9 @@ var mrsFS embed.FS
 //go:embed assets/cn-bypass.nft
 var cnBypassNft []byte
 
+//go:embed assets/cn-bypass6.nft
+var cnBypass6Nft []byte
+
 func main() {
 	var (
 		dirFlag  string
@@ -66,7 +69,7 @@ func main() {
 		log.Printf("warn: extract mrs: %v", err)
 	}
 
-	// 提取 cn-bypass.nft（已存在则跳过）
+	// 提取 cn-bypass.nft 和 cn-bypass6.nft（已存在则跳过）
 	cnNftDst := filepath.Join(dataDir, "cn-bypass.nft")
 	if _, statErr := os.Stat(cnNftDst); os.IsNotExist(statErr) {
 		if len(cnBypassNft) > 0 {
@@ -74,6 +77,16 @@ func main() {
 				log.Printf("warn: extract cn-bypass.nft: %v", err)
 			} else {
 				log.Printf("metaviz: extracted cn-bypass.nft -> %s", cnNftDst)
+			}
+		}
+	}
+	cn6NftDst := filepath.Join(dataDir, "cn-bypass6.nft")
+	if _, statErr := os.Stat(cn6NftDst); os.IsNotExist(statErr) {
+		if len(cnBypass6Nft) > 0 {
+			if err := os.WriteFile(cn6NftDst, cnBypass6Nft, 0644); err != nil {
+				log.Printf("warn: extract cn-bypass6.nft: %v", err)
+			} else {
+				log.Printf("metaviz: extracted cn-bypass6.nft -> %s", cn6NftDst)
 			}
 		}
 	}
