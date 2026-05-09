@@ -24,7 +24,7 @@
 
 ```bash
 # amd64
-wget https://github.com/yourname/metaviz/releases/latest/download/metaviz-linux-amd64 -O metaviz
+wget https://github.com/evecus/metaviz/releases/latest/download/metaviz-linux-amd64 -O metaviz
 chmod +x metaviz
 ```
 
