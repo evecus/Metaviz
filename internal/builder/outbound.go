@@ -22,6 +22,12 @@ func NodeToProxy(n *node.Node) (map[string]interface{}, error) {
 		return tuicProxy(n)
 	case node.ProtoHysteria2:
 		return hy2Proxy(n)
+	case node.ProtoWireGuard:
+		return wireguardProxy(n)
+	case node.ProtoSOCKS5:
+		return socks5Proxy(n)
+	case node.ProtoHTTP:
+		return httpProxy(n)
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", n.Protocol)
 	}
@@ -221,4 +227,82 @@ func nonEmpty(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// ── WireGuard ──────────────────────────────────────────────────────────────
+
+func wireguardProxy(n *node.Node) (map[string]interface{}, error) {
+	m := M{
+		"name":        n.Name,
+		"type":        "wireguard",
+		"server":      n.Address,
+		"port":        n.Port,
+		"private-key": n.WGPrivateKey,
+		"public-key":  n.WGPublicKey,
+		"udp":         true,
+	}
+	if len(n.WGIP) > 0 {
+		m["ip"] = strings.Join(n.WGIP, ", ")
+	}
+	if n.WGMTU > 0 {
+		m["mtu"] = n.WGMTU
+	}
+	if n.WGPresharedKey != "" {
+		m["preshared-key"] = n.WGPresharedKey
+	}
+	if len(n.WGReserved) > 0 {
+		m["reserved"] = n.WGReserved
+	}
+	return m, nil
+}
+
+// ── SOCKS5 ────────────────────────────────────────────────────────────────
+
+func socks5Proxy(n *node.Node) (map[string]interface{}, error) {
+	m := M{
+		"name":   n.Name,
+		"type":   "socks5",
+		"server": n.Address,
+		"port":   n.Port,
+		"udp":    true,
+	}
+	if n.Username != "" {
+		m["username"] = n.Username
+		m["password"] = n.Password
+	}
+	if n.TLS == "tls" {
+		m["tls"] = true
+		if n.SNI != "" {
+			m["sni"] = n.SNI
+		}
+		if n.Insecure {
+			m["skip-cert-verify"] = true
+		}
+	}
+	return m, nil
+}
+
+// ── HTTP / HTTPS ──────────────────────────────────────────────────────────
+
+func httpProxy(n *node.Node) (map[string]interface{}, error) {
+	m := M{
+		"name":   n.Name,
+		"type":   "http",
+		"server": n.Address,
+		"port":   n.Port,
+	}
+	if n.Username != "" {
+		m["username"] = n.Username
+		m["password"] = n.Password
+	}
+	if n.HTTPS {
+		m["tls"] = true
+		if n.SNI != "" {
+			m["sni"] = n.SNI
+		}
+		if n.Insecure {
+			m["skip-cert-verify"] = true
+		}
+	}
+	return m, nil
 }

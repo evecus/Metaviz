@@ -45,6 +45,14 @@ func ParseLink(s string) (*Node, error) {
 		return parseTUIC(s)
 	case strings.HasPrefix(low, "hy2://"), strings.HasPrefix(low, "hysteria2://"):
 		return parseHysteria2(s)
+	case strings.HasPrefix(low, "wireguard://"), strings.HasPrefix(low, "wg://"):
+		return parseWireGuard(s)
+	case strings.HasPrefix(low, "socks5://"), strings.HasPrefix(low, "socks://"):
+		return parseSOCKS5(s)
+	case strings.HasPrefix(low, "https://"):
+		return parseHTTPProxy(s, true)
+	case strings.HasPrefix(low, "http://"):
+		return parseHTTPProxy(s, false)
 	default:
 		return nil, fmt.Errorf("unsupported protocol")
 	}
@@ -426,4 +434,120 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// ── WireGuard ──────────────────────────────────────────────────────────────
+// wireguard://privateKey@server:port?publicKey=xxx&ip=10.0.0.2/32&mtu=1420&presharedKey=xxx&reserved=0,0,0#name
+
+func parseWireGuard(s string) (*Node, error) {
+	// normalise scheme so url.Parse works
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "wg://") {
+		s = "wireguard://" + s[5:]
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Protocol:     ProtoWireGuard,
+		Address:      u.Hostname(),
+		Port:         atoiSafe(u.Port()),
+		Name:         decodeFragment(u.Fragment),
+		WGPrivateKey: u.User.Username(),
+	}
+	if n.Name == "" {
+		n.Name = n.Address
+	}
+	q := u.Query()
+	n.WGPublicKey = q.Get("publicKey")
+	if n.WGPublicKey == "" {
+		n.WGPublicKey = q.Get("pub")
+	}
+	if ip := q.Get("ip"); ip != "" {
+		for _, part := range strings.Split(ip, ",") {
+			if t := strings.TrimSpace(part); t != "" {
+				n.WGIP = append(n.WGIP, t)
+			}
+		}
+	}
+	if mtu := q.Get("mtu"); mtu != "" {
+		n.WGMTU = atoiSafe(mtu)
+	}
+	n.WGPresharedKey = q.Get("presharedKey")
+	if reserved := q.Get("reserved"); reserved != "" {
+		for _, part := range strings.Split(reserved, ",") {
+			n.WGReserved = append(n.WGReserved, atoiSafe(strings.TrimSpace(part)))
+		}
+	}
+	return n, nil
+}
+
+// ── SOCKS5 ────────────────────────────────────────────────────────────────
+// socks5://user:pass@host:port#name  or  socks://...
+
+func parseSOCKS5(s string) (*Node, error) {
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "socks://") {
+		s = "socks5://" + s[8:]
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Protocol: ProtoSOCKS5,
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		Name:     decodeFragment(u.Fragment),
+	}
+	if n.Name == "" {
+		n.Name = n.Address
+	}
+	if u.User != nil {
+		n.Username, _ = url.PathUnescape(u.User.Username())
+		n.Password, _ = u.User.Password()
+	}
+	q := u.Query()
+	if q.Get("tls") == "1" || q.Get("security") == "tls" {
+		n.TLS = "tls"
+		n.SNI = q.Get("sni")
+		if q.Get("allowInsecure") == "1" || q.Get("insecure") == "1" {
+			n.Insecure = true
+		}
+	}
+	return n, nil
+}
+
+// ── HTTP / HTTPS ──────────────────────────────────────────────────────────
+// http://user:pass@host:port#name   https://user:pass@host:port#name
+
+func parseHTTPProxy(s string, https bool) (*Node, error) {
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Protocol: ProtoHTTP,
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		Name:     decodeFragment(u.Fragment),
+		HTTPS:    https,
+	}
+	if n.Name == "" {
+		n.Name = n.Address
+	}
+	if u.User != nil {
+		n.Username, _ = url.PathUnescape(u.User.Username())
+		n.Password, _ = u.User.Password()
+	}
+	if https {
+		n.TLS = "tls"
+		q := u.Query()
+		n.SNI = q.Get("sni")
+		if q.Get("allowInsecure") == "1" || q.Get("insecure") == "1" {
+			n.Insecure = true
+		}
+	}
+	return n, nil
 }

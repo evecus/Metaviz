@@ -16,6 +16,9 @@ const (
 	ProtoSS        Protocol = "ss"
 	ProtoTUIC      Protocol = "tuic"
 	ProtoHysteria2 Protocol = "hysteria2"
+	ProtoWireGuard Protocol = "wireguard"
+	ProtoSOCKS5    Protocol = "socks5"
+	ProtoHTTP      Protocol = "http"
 )
 
 type Node struct {
@@ -64,6 +67,18 @@ type Node struct {
 	ObfsPassword string `json:"obfsPassword,omitempty"`
 	Ports        string `json:"ports,omitempty"`
 	PinSHA256    string `json:"pinSHA256,omitempty"`
+
+	// WireGuard
+	WGPrivateKey string   `json:"wgPrivateKey,omitempty"`
+	WGPublicKey  string   `json:"wgPublicKey,omitempty"`
+	WGIP         []string `json:"wgIp,omitempty"`          // 本机 tunnel IP，如 ["10.0.0.2/32"]
+	WGMTU        int      `json:"wgMtu,omitempty"`
+	WGPresharedKey string `json:"wgPresharedKey,omitempty"`
+	WGReserved   []int    `json:"wgReserved,omitempty"`    // Cloudflare WARP [R,R,R]
+
+	// SOCKS5 / HTTP(S)
+	Username string `json:"username,omitempty"` // socks5/http 用户名（区别于 UUID）
+	HTTPS    bool   `json:"https,omitempty"`    // http 代理是否启用 TLS（即 HTTPS）
 }
 
 func NewID() string { return uuid.New().String() }
@@ -96,6 +111,12 @@ func FromMap(m map[string]any) (*Node, error) {
 		proto = ProtoTUIC
 	case "hysteria2":
 		proto = ProtoHysteria2
+	case "wireguard":
+		proto = ProtoWireGuard
+	case "socks5":
+		proto = ProtoSOCKS5
+	case "http":
+		proto = ProtoHTTP
 	default:
 		return nil, fmt.Errorf("unsupported proxy type %q", typ)
 	}
@@ -170,6 +191,35 @@ func FromMap(m map[string]any) (*Node, error) {
 	n.ObfsType, _ = m["obfs"].(string)
 	n.ObfsPassword, _ = m["obfs-password"].(string)
 	n.Ports, _ = m["ports"].(string)
+
+	// WireGuard
+	n.WGPrivateKey, _ = m["private-key"].(string)
+	n.WGPublicKey, _ = m["public-key"].(string)
+	if mtu, ok := m["mtu"].(int); ok {
+		n.WGMTU = mtu
+	} else if mtuF, ok := m["mtu"].(float64); ok {
+		n.WGMTU = int(mtuF)
+	}
+	n.WGPresharedKey, _ = m["preshared-key"].(string)
+	if ipRaw, ok := m["ip"].(string); ok && ipRaw != "" {
+		n.WGIP = strings.Split(ipRaw, ",")
+		for i, s := range n.WGIP {
+			n.WGIP[i] = strings.TrimSpace(s)
+		}
+	}
+	if reserved, ok := m["reserved"].([]interface{}); ok {
+		for _, v := range reserved {
+			if f, ok := v.(float64); ok {
+				n.WGReserved = append(n.WGReserved, int(f))
+			}
+		}
+	}
+
+	// SOCKS5 / HTTP(S)
+	n.Username = str("username")
+	if tls, ok := m["tls"].(bool); ok {
+		n.HTTPS = tls
+	}
 
 	return n, nil
 }
