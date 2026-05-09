@@ -69,6 +69,18 @@ func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 		} else {
 			log.Printf("firewall: cn-bypass.nft not found at %s", cnNftPath)
 		}
+		if ipv6 {
+			cn6NftPath := filepath.Join(filepath.Dir(nftConfPath), "cn-bypass6.nft")
+			if _, err := os.Stat(cn6NftPath); err == nil {
+				if err := runCmd("nft -f " + cn6NftPath); err != nil {
+					log.Printf("firewall: cn-bypass6 load: %v", err)
+				} else {
+					log.Println("firewall: CN bypass IPv6 rules loaded")
+				}
+			} else {
+				log.Printf("firewall: cn-bypass6.nft not found at %s", cn6NftPath)
+			}
+		}
 	}
 	return nil
 }
