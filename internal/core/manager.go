@@ -514,7 +514,6 @@ func (m *Manager) Stop() {
 			log.Printf("warn: clear system proxy: %v", err)
 		}
 	}
-	cleanRunDir(m.runDir)
 	m.state = StateStopped
 	m.cmd = nil
 	m.saveState(false)
