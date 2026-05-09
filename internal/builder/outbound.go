@@ -107,11 +107,14 @@ func tuicProxy(n *node.Node) (map[string]interface{}, error) {
 
 func hy2Proxy(n *node.Node) (map[string]interface{}, error) {
 	m := M{
-		"name":     n.Name,
-		"type":     "hysteria2",
-		"server":   n.Address,
-		"port":     n.Port,
-		"password": n.Password,
+		"name":             n.Name,
+		"type":             "hysteria2",
+		"server":           n.Address,
+		"port":             n.Port,
+		"password":         n.Password,
+		"sni":              nonEmpty(n.SNI, n.Address),
+		"skip-cert-verify": n.Insecure,
+		"tfo":              false,
 	}
 	if n.Ports != "" {
 		m["ports"] = n.Ports
@@ -120,7 +123,12 @@ func hy2Proxy(n *node.Node) (map[string]interface{}, error) {
 		m["obfs"] = n.ObfsType
 		m["obfs-password"] = n.ObfsPassword
 	}
-	setTLS(m, n)
+	if n.Fingerprint != "" {
+		m["fingerprint"] = n.Fingerprint
+	}
+	if n.ALPN != "" {
+		m["alpn"] = strings.Split(n.ALPN, ",")
+	}
 	return m, nil
 }
 

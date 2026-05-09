@@ -276,7 +276,6 @@ func parseHysteria2(s string) (*Node, error) {
 		Password: userDecode(u),
 		Name:     decodeFragment(u.Fragment),
 		TLS:      "tls",
-		SNI:      "sni",
 	}
 	q := u.Query()
 	fillTLS(n, q)

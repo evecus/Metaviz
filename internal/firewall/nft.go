@@ -196,6 +196,13 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
 		s.WriteString("    set interface6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
 	}
 
+	if bypassCN {
+		s.WriteString("    set cn_bypass {\n        type ipv4_addr\n        flags interval\n        auto-merge\n    }\n")
+		if ipv6 {
+			s.WriteString("    set cn_bypass6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
+		}
+	}
+
 	if ipfSetDef != "" {
 		s.WriteString(ipfSetDef)
 	}
@@ -409,7 +416,6 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 // avoids spurious "ip rule del" errors when those routes were never added.
 func cleanup(modes config.ProxyModes, ipv6 bool, tunDevice string) {
 	_ = runCmd("nft delete table inet metaviz")
-	_ = runCmd("nft delete table inet metaviz_cnbypass")
 
 	if modes.NeedsTProxyInbound() {
 		cleanupTProxyRoutes(ipv6)
