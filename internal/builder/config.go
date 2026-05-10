@@ -19,7 +19,7 @@ const (
 
 // FakeIP 池地址段常量，供 builder 和 firewall 共用。
 const (
-	FakeIPRange  = "198.18.0.0/16"
+	FakeIPRange  = "198.18.0.0/15"
 	FakeIP6Range = "fc00::/18"
 )
 

@@ -78,7 +78,7 @@ func ApplyTunRoutes(ipv6 bool) {
 	if activeTunDevice == "" {
 		return
 	}
-	setupTunRoutes(ipv6, activeTunDevice)
+	setupTunRoutes(ipv6, activeTunDevice, activeFakeIP)
 }
 
 // Stop tears down nftables rules and ip routes for the last active modes.

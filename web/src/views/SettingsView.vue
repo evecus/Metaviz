@@ -70,7 +70,7 @@
               <div class="toggle-label">启用 Fake-IP 模式</div>
               <div class="toggle-desc">
                 使用虚假 IP 进行透明代理，减少 DNS 泄露，提升连接速度。
-                启用后防火墙会自动处理 fakeip 池（198.18.0.0/16、fc00::/18）的路由。
+                启用后防火墙会自动处理 fakeip 池（198.18.0.0/15、fc00::/18）的路由。
               </div>
             </div>
             <label class="toggle"><input type="checkbox" v-model="ms.inbound.fakeIP"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
@@ -86,7 +86,7 @@
                 请在您的配置文件中手动设置 fake-ip DNS，fakeip 地址池为：
               </p>
               <div class="fakeip-pool">
-                <code>fake-ip-range: 198.18.0.0/16</code>
+                <code>fake-ip-range: 198.18.0.0/15</code>
                 <code>fake-ip-range6: fc00::/18</code>
               </div>
               <p style="margin-top:6px;color:var(--text3);font-size:12px">
