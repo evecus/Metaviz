@@ -62,6 +62,40 @@
           </div>
         </div>
 
+        <!-- ── DNS 模式 ──────────────────────────────────── -->
+        <div class="card">
+          <div class="card-title">DNS 模式</div>
+          <div class="toggle-row" style="border:none;padding:0">
+            <div>
+              <div class="toggle-label">启用 Fake-IP 模式</div>
+              <div class="toggle-desc">
+                使用虚假 IP 进行透明代理，减少 DNS 泄露，提升连接速度。
+                启用后防火墙会自动处理 fakeip 池（198.18.0.0/16、fc00::/18）的路由。
+              </div>
+            </div>
+            <label class="toggle"><input type="checkbox" v-model="ms.inbound.fakeIP"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
+          </div>
+
+          <!-- 开启 fakeip 时的说明 -->
+          <div v-if="ms.inbound.fakeIP" class="fakeip-info">
+            <div class="fakeip-info-title">📌 Fake-IP 说明</div>
+            <div class="fakeip-info-body">
+              <p><strong>单节点 / 订阅模式</strong>：面板自动生成 fake-ip DNS 配置，无需手动操作。</p>
+              <p>
+                <strong>上传配置模式</strong>：面板不修改上传配置的 DNS 块，
+                请在您的配置文件中手动设置 fake-ip DNS，fakeip 地址池为：
+              </p>
+              <div class="fakeip-pool">
+                <code>fake-ip-range: 198.18.0.0/16</code>
+                <code>fake-ip-range6: fc00::/18</code>
+              </div>
+              <p style="margin-top:6px;color:var(--text3);font-size:12px">
+                ⚠️ 防火墙规则（包括 fakeip 路由和 ICMP 劫持）在所有模式下均按此开关生效。
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- ── 端口配置 ───────────────────────────────────── -->
         <div class="card">
           <div class="card-title">端口配置</div>
@@ -318,9 +352,9 @@ const udpModes = [
   { v: 'tun',    label: 'TUN',      desc: '虚拟网卡' },
 ]
 
-// Meta settings
+// Meta settings（含 inbound.fakeIP）
 const ms = reactive({
-  inbound: { mixedPort: 7890, redirectPort: 7892, tproxyPort: 7893, dnsPort: 1053 },
+  inbound: { mixedPort: 7890, redirectPort: 7892, tproxyPort: 7893, dnsPort: 1053, fakeIP: false },
   tun: { device: 'Meta', stack: 'mixed', mtu: 1500 },
   sniffer: { enable: true, overrideDestination: true },
   log: { level: 'warning' },
@@ -335,15 +369,15 @@ const newPassword = ref('')
 const ipf = reactive({ mode: 'off', ipsText: '' })
 
 // mihomo
-const mihomoVer   = ref('')
-const sysInfo     = ref({ osName: '' })
-const installing  = ref(false)
-const installProxy = ref('')
+const mihomoVer    = ref('')
+const sysInfo      = ref({ osName: '' })
+const installing   = ref(false)
+const installProxy  = ref('')
 const installResult = ref(null)
 
 // Rulesets
-const rulesets        = ref([])
-const updatingRules   = ref(false)
+const rulesets         = ref([])
+const updatingRules    = ref(false)
 const updateRulesResult = ref(null)
 
 async function loadAll() {
@@ -444,4 +478,44 @@ onMounted(loadAll)
 .radio-row input { accent-color:var(--accent); flex-shrink:0; }
 .radio-label { font-size:13px; font-weight:600; color:var(--text); }
 .radio-desc  { font-size:11.5px; color:var(--text3); margin-left:auto; }
+
+/* fakeip 提示框 */
+.fakeip-info {
+  margin-top:12px;
+  border-radius:var(--radius);
+  border:1px solid var(--accent);
+  background:var(--accent-bg);
+  overflow:hidden;
+}
+.fakeip-info-title {
+  padding:8px 14px;
+  font-size:13px;
+  font-weight:600;
+  color:var(--accent);
+  border-bottom:1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.fakeip-info-body {
+  padding:10px 14px;
+  font-size:13px;
+  color:var(--text2);
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.fakeip-info-body p { margin:0; line-height:1.6; }
+.fakeip-pool {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:4px;
+}
+.fakeip-pool code {
+  font-family:var(--mono);
+  font-size:12px;
+  background:var(--surface2);
+  border:1px solid var(--border2);
+  border-radius:4px;
+  padding:3px 8px;
+  color:var(--text);
+}
 </style>

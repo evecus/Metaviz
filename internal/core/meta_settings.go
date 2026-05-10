@@ -19,6 +19,7 @@ type InboundSettings struct {
 	DNSPort      int  `json:"dnsPort"`      // 默认 1053
 	AllowLan     bool `json:"allowLan"`
 	IPv6         bool `json:"ipv6"`
+	FakeIP       bool `json:"fakeIP"` // 开启 fake-ip 模式（仅影响单节点/订阅模式的生成配置）
 }
 
 type TunSettings struct {
@@ -39,10 +40,10 @@ type LogSettings struct {
 }
 
 type ClashAPISettings struct {
-	Listen   string `json:"listen"`   // 默认 "0.0.0.0:9090"
-	Secret   string `json:"secret"`
-	UI       string `json:"ui"`
-	UIURL    string `json:"uiURL"`
+	Listen string `json:"listen"` // 默认 "0.0.0.0:9090"
+	Secret string `json:"secret"`
+	UI     string `json:"ui"`
+	UIURL  string `json:"uiURL"`
 }
 
 type MiscSettings struct {
@@ -72,6 +73,7 @@ func DefaultMetaSettings() MetaSettings {
 			DNSPort:      1053,
 			AllowLan:     false,
 			IPv6:         false,
+			FakeIP:       false,
 		},
 		Tun: TunSettings{
 			Enable: false,
@@ -143,8 +145,7 @@ func (ms MetaSettings) Filled() MetaSettings {
 	return ms
 }
 
-// toProxyModes 把 TunSettings 转换为 config.ProxyModes（供 firewall 使用）
-// 实际上代理模式由 ProxySettings 控制，这里只是兼容接口。
+// InboundPorts 返回各监听端口（供 firewall 使用）。
 func (ms MetaSettings) InboundPorts() (dns, mixed, redirect, tproxy int) {
 	return ms.Inbound.DNSPort, ms.Inbound.MixedPort, ms.Inbound.RedirectPort, ms.Inbound.TProxyPort
 }

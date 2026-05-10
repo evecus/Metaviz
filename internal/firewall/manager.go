@@ -11,17 +11,18 @@ import (
 
 var mu sync.Mutex
 
-// activeTunDevice remembers the tun interface name used in the last Apply()
-// so that Stop() / cleanup() can remove the correct ip route/rule entries.
+// activeTunDevice remembers the tun interface name used in the last Apply().
 var activeTunDevice string
 
 // activeModes remembers which proxy modes were active so cleanup only tears
-// down the routes that were actually installed, avoiding spurious errors when
-// running ip rule/route del on entries that were never added.
+// down the routes that were actually installed.
 var activeModes config.ProxyModes
 
 // activeIPv6 remembers whether IPv6 routes were installed.
 var activeIPv6 bool
+
+// activeFakeIP remembers whether fakeip mode was active.
+var activeFakeIP bool
 
 // Ports holds the listen ports that nftables needs to know about.
 type Ports struct {
@@ -31,10 +32,13 @@ type Ports struct {
 }
 
 // Apply sets up nftables rules for the chosen TCP/UDP proxy modes.
-// tunDevice is the TUN interface name configured by the user (e.g. "metaviz",
-// "tun0"). It is used in both the nft iifname match and the ip route rules.
-// If systemProxy is true, no nftables rules or routes are configured at all.
-func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, ipf ipfilter.Config, systemProxy bool) error {
+// fakeIP controls whether fakeip-specific nft rules are generated:
+//   - proxy_rule chain 中提前 accept fakeip 段（198.18.0.0/16, fc00::/18）
+//   - NAT 链中添加 ICMP ping 劫持，避免 ping fakeip 地址超时
+//
+// 上传配置模式下也应传入 fakeIP=true（若用户配置了 fakeip），
+// 防火墙规则与配置模式无关，只要 fakeip 池地址需要被代理就需要开启。
+func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, ipf ipfilter.Config, systemProxy bool, fakeIP bool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -47,6 +51,7 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 	activeTunDevice = tunDevice
 	activeModes = modes
 	activeIPv6 = ipv6
+	activeFakeIP = fakeIP
 
 	if systemProxy {
 		log.Println("firewall: system_proxy enabled — skipping nftables rules and routes")
@@ -58,7 +63,7 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 		return nil
 	}
 
-	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf); err != nil {
+	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf, fakeIP); err != nil {
 		return fmt.Errorf("nft setup: %w", err)
 	}
 
@@ -67,7 +72,6 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 }
 
 // ApplyTunRoutes re-adds the ip rule/route entries for TUN mode.
-// Called after mihomo has started and created the TUN device.
 func ApplyTunRoutes(ipv6 bool) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -85,4 +89,5 @@ func Stop() {
 	activeTunDevice = ""
 	activeModes = config.ProxyModes{}
 	activeIPv6 = false
+	activeFakeIP = false
 }

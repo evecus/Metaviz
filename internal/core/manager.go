@@ -411,7 +411,7 @@ func (m *Manager) Start(p StartParams) error {
 	if tunDevice == "" {
 		tunDevice = "Meta"
 	}
-	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, tunDevice, m.dataDir, gid, ipf, ps.SystemProxy); err != nil {
+	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, tunDevice, m.dataDir, gid, ipf, ps.SystemProxy, ms.Inbound.FakeIP); err != nil {
 		return fmt.Errorf("firewall: %w", err)
 	}
 
@@ -804,5 +804,8 @@ func metaSettingsToGlobal(ms MetaSettings, ps ProxySettings) builder.GlobalConfi
 		FindProcessMode: ms.Misc.FindProcessMode,
 		UnifiedDelay:    ms.Misc.UnifiedDelay,
 		TCPConcurrent:   ms.Misc.TCPConcurrent,
+		// FakeIP 仅对单节点/订阅模式的生成配置生效；上传配置模式由用户自行控制 DNS。
+		// 但防火墙规则在所有模式下均按此开关处理 fakeip 段的路由。
+		FakeIP: ms.Inbound.FakeIP,
 	}
 }

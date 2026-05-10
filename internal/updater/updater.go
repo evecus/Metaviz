@@ -18,12 +18,14 @@ type Result struct {
 
 // mrsFiles maps local filename → download URL.
 var mrsFiles = map[string]string{
-	"geosite-cn.mrs":                "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/cn.mrs",
-	"geoip-cn.mrs":                  "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geoip/cn.mrs",
-	"geosite-gfw.mrs":               "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/gfw.mrs",
-	"geosite-geolocation-!cn.mrs":   "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/geolocation-!cn.mrs",
-	"geoip-telegram.mrs":            "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geoip/telegram.mrs",
-	"ads.mrs":                       "https://raw.githubusercontent.com/evecus/ruleset/refs/heads/master/mihomo/ads.mrs",
+	"geosite-cn.mrs":              "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/cn.mrs",
+	"geoip-cn.mrs":                "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geoip/cn.mrs",
+	"geosite-gfw.mrs":             "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/gfw.mrs",
+	"geosite-geolocation-!cn.mrs": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/geolocation-!cn.mrs",
+	"geoip-telegram.mrs":          "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geoip/telegram.mrs",
+	"ads.mrs":                     "https://raw.githubusercontent.com/evecus/ruleset/refs/heads/master/mihomo/ads.mrs",
+	// fakeip 过滤规则集：域名黑名单，这些域名不应分配 fakeip（NTP、STUN、本地服务等）
+	"fakeipfilter.mrs": "https://raw.githubusercontent.com/wwqgtxx/clash-rules/release/fakeip-filter.mrs",
 }
 
 // UpdateAll downloads all known mrs files to mrsDir.

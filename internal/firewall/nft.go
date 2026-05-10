@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/metaviz/internal/builder"
 	"github.com/metaviz/internal/config"
 	"github.com/metaviz/internal/ipfilter"
 )
@@ -28,7 +29,8 @@ const (
 )
 
 // privateRangesV4 covers fib-type addresses and all RFC-reserved IPv4 ranges.
-// Used identically in proxy_rule and tcp_redirect so the two chains are consistent.
+// 注意：198.18.0.0/15 包含了我们的 fakeip 段 198.18.0.0/16，
+// 在 fakeip 模式下需要在这些规则之前优先放行 fakeip 流量。
 const privateRangesV4 = "" +
 	"        fib daddr type { local, broadcast, anycast, multicast } return\n" +
 	"        ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, " +
@@ -36,14 +38,13 @@ const privateRangesV4 = "" +
 	"192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return\n"
 
 // privateRangesV6 covers all RFC-reserved IPv6 ranges.
-// Used in proxy_rule (IPv6 traffic) and tcp_redirect (when IPv6 is enabled).
 const privateRangesV6 = "" +
 	"        ip6 daddr { ::/127, fc00::/7, fe80::/10, ff00::/8 } return\n"
 
 // ── Entry point ────────────────────────────────────────────────────────────
 
-func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config) error {
-	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf)
+func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config, fakeIP bool) error {
+	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf, fakeIP)
 	if err := os.WriteFile(nftConfPath, []byte(conf), 0644); err != nil {
 		return fmt.Errorf("write nft conf: %w", err)
 	}
@@ -86,7 +87,6 @@ func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 }
 
 // setupRoutes installs ip rule / ip route entries for the active modes.
-// Only installs routes for modes that are actually in use.
 func setupRoutes(modes config.ProxyModes, ipv6 bool, tunDevice string) error {
 	if modes.NeedsTProxyInbound() {
 		if err := setupTProxyRoutes(ipv6); err != nil {
@@ -141,10 +141,6 @@ func setupTunRoutes(ipv6 bool, tunDevice string) error {
 
 // ── IP filter set ──────────────────────────────────────────────────────────
 
-// buildIPFilterNft builds the nft set definition and rule snippet for the
-// IP filter feature.  Only IPv4 addresses/CIDRs are accepted; IPv6 entries
-// are silently skipped because the set type is ipv4_addr and mixing them
-// would cause nft to error out and leave the machine unprotected.
 func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSnippet string) {
 	if ipf.Mode == ipfilter.ModeOff || !lanProxy || len(ipf.IPs) == 0 {
 		return "", ""
@@ -153,13 +149,11 @@ func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSn
 	var elems []string
 	for _, p := range parts {
 		if strings.Contains(p, "/") {
-			// CIDR — parse and verify it is IPv4
 			ip, _, err := net.ParseCIDR(p)
 			if err != nil {
 				continue
 			}
 			if ip.To4() == nil {
-				// IPv6 CIDR — skip; adding to an ipv4_addr set causes nft error
 				log.Printf("firewall: ip_filter: skipping IPv6 CIDR %s (only IPv4 supported)", p)
 				continue
 			}
@@ -170,7 +164,6 @@ func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSn
 				continue
 			}
 			if ip.To4() == nil {
-				// IPv6 address — skip for the same reason
 				log.Printf("firewall: ip_filter: skipping IPv6 address %s (only IPv4 supported)", p)
 				continue
 			}
@@ -195,15 +188,13 @@ func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSn
 
 // ── Main table builder ─────────────────────────────────────────────────────
 
-func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config) string {
+func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config, fakeIP bool) string {
 	ipfSetDef, ipfRule := buildIPFilterNft(ipf, lanProxy)
 	var s strings.Builder
 
 	s.WriteString("table inet metaviz {\n")
 
-	// interface set is always present (populated by SyncLocalIPs after nft -f).
 	s.WriteString("    set interface {\n        type ipv4_addr\n        flags interval\n        auto-merge\n    }\n")
-	// interface6 is only defined when IPv6 is enabled so it is actually used.
 	if ipv6 {
 		s.WriteString("    set interface6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
 	}
@@ -237,7 +228,7 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
 `, tunFwMark))
 	}
 
-	s.WriteString(buildProxyRuleChain(modes, ipfRule, ipv6, bypassCN))
+	s.WriteString(buildProxyRuleChain(modes, ipfRule, ipv6, bypassCN, fakeIP))
 	s.WriteString(buildManglePrerouting(modes, ports, lanProxy, ipv6, tunDevice))
 	s.WriteString(buildMangleOutput(modes, ipv6, gid))
 
@@ -253,14 +244,14 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
     }
 `)
 
-	s.WriteString(buildNATChains(modes, ports, ipv6, gid))
+	s.WriteString(buildNATChains(modes, ports, ipv6, gid, fakeIP))
 	s.WriteString("}\n")
 	return s.String()
 }
 
 // ── proxy_rule chain ───────────────────────────────────────────────────────
 
-func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, bypassCN bool) string {
+func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, bypassCN bool, fakeIP bool) string {
 	var s strings.Builder
 	s.WriteString("\n    chain proxy_rule {\n")
 
@@ -271,6 +262,16 @@ func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, byp
 	if modes.NeedsTunInbound() {
 		s.WriteString("        meta mark set ct mark\n")
 		s.WriteString(fmt.Sprintf("        meta mark & %s == %s return\n", tunFwMask, tunFwMark))
+	}
+
+	// fakeip 模式：在所有 return 规则之前，优先放行 fakeip 池流量。
+	// privateRangesV4 包含 198.18.0.0/15，会把 fakeip 段 198.18.0.0/16 return 掉，
+	// 所以必须在这里提前 accept，确保 fakeip 流量能到达代理入站。
+	if fakeIP {
+		s.WriteString(fmt.Sprintf("        ip daddr %s meta l4proto { tcp, udp } accept\n", builder.FakeIPRange))
+		if ipv6 {
+			s.WriteString(fmt.Sprintf("        ip6 daddr %s meta l4proto { tcp, udp } accept\n", builder.FakeIP6Range))
+		}
 	}
 
 	s.WriteString(privateRangesV4)
@@ -318,7 +319,6 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 	var s strings.Builder
 	s.WriteString("\n    chain proxy_pre {\n")
 
-	// Early-return: skip traffic that originates from the proxy itself.
 	if modes.NeedsTunInbound() {
 		s.WriteString(fmt.Sprintf("        iifname \"%s\" return\n", tunDevice))
 	}
@@ -326,9 +326,6 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 		s.WriteString("        iifname \"lo\" mark & 0xc0 != 0x40 return\n")
 	}
 
-	// LAN proxy: intercept forwarded traffic (non-local src AND non-local dst).
-	// Without lanProxy this chain only handles the tproxy redirect below, which
-	// acts on packets already marked by proxy_out (output hook, local traffic).
 	if lanProxy {
 		if ipv6 {
 			s.WriteString("        meta nfproto { ipv4, ipv6 } meta l4proto { tcp, udp } fib saddr type != local fib daddr type != local jump proxy_rule\n")
@@ -337,7 +334,6 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 		}
 	}
 
-	// Redirect marked packets to the tproxy inbound.
 	if modes.NeedsTProxyInbound() {
 		s.WriteString(fmt.Sprintf("        meta nfproto ipv4 meta l4proto { tcp, udp } mark & 0xc0 == 0x40 tproxy ip to 127.0.0.1:%d\n", ports.TProxy))
 		if ipv6 {
@@ -366,7 +362,7 @@ func buildMangleOutput(modes config.ProxyModes, ipv6 bool, gid uint32) string {
 
 // ── NAT chains ─────────────────────────────────────────────────────────────
 
-func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32) string {
+func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32, fakeIP bool) string {
 	var s strings.Builder
 
 	dnsV4 := fmt.Sprintf("        ip daddr != 127.0.0.1 meta l4proto { tcp, udp } th dport 53 redirect to :%d\n", ports.DNS)
@@ -382,9 +378,6 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 `, gid, ports.DNS, dnsV4, dnsV6))
 
 	if modes.TCP == config.TCPModeRedir {
-		// tcp_redirect uses the shared privateRangesV4 constant so it stays in
-		// sync with proxy_rule.  When IPv6 is enabled, privateRangesV6 is also
-		// added so we don't accidentally redirect link-local / ULA TCP traffic.
 		nfproto := "meta nfproto ipv4"
 		if ipv6 {
 			nfproto = "meta nfproto { ipv4, ipv6 }"
@@ -402,11 +395,27 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 `, gid, privateRangesV4, ipv6Ranges, nfproto, ports.Redirect))
 	}
 
+	// fakeip ping 劫持链：把发往 fakeip 段的 ICMP echo-request 重定向到本机，
+	// 让内核直接回包，避免 ping 测延迟时超时失败。参考 xproxy 实现。
+	if fakeIP {
+		s.WriteString(fmt.Sprintf(`
+    chain fakeip_ping {
+        icmp type echo-request ip daddr %s counter redirect
+`, builder.FakeIPRange))
+		if ipv6 {
+			s.WriteString(fmt.Sprintf("        icmpv6 type echo-request ip6 daddr %s counter redirect\n", builder.FakeIP6Range))
+		}
+		s.WriteString("    }\n")
+	}
+
 	s.WriteString("\n    chain prerouting_nat {\n")
 	s.WriteString("        type nat hook prerouting priority dstnat - 5; policy accept;\n")
 	s.WriteString("        jump dns_redirect\n")
 	if modes.TCP == config.TCPModeRedir {
 		s.WriteString("        jump tcp_redirect\n")
+	}
+	if fakeIP {
+		s.WriteString("        jump fakeip_ping\n")
 	}
 	s.WriteString("    }\n")
 
@@ -416,6 +425,9 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 	if modes.TCP == config.TCPModeRedir {
 		s.WriteString("        jump tcp_redirect\n")
 	}
+	if fakeIP {
+		s.WriteString("        jump fakeip_ping\n")
+	}
 	s.WriteString("    }\n")
 
 	return s.String()
@@ -423,9 +435,6 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 
 // ── Cleanup ────────────────────────────────────────────────────────────────
 
-// cleanup tears down only the nft table and ip routes that were actually
-// installed for the given modes.  Passing the modes used at Apply() time
-// avoids spurious "ip rule del" errors when those routes were never added.
 func cleanup(modes config.ProxyModes, ipv6 bool, tunDevice string) {
 	_ = runCmd("nft delete table inet metaviz")
 
@@ -481,8 +490,6 @@ func cleanupTunRoutes(ipv6 bool, tunDevice string) {
 func AddInterfaceIP(cidr string) {
 	set := "interface"
 	if !strings.Contains(cidr, ".") {
-		// interface6 set is only created in the nft table when IPv6 is enabled.
-		// Skip silently if IPv6 was not enabled to avoid "No such file or directory" errors.
 		if !activeIPv6 {
 			return
 		}
@@ -496,8 +503,6 @@ func AddInterfaceIP(cidr string) {
 func RemoveInterfaceIP(cidr string) {
 	set := "interface"
 	if !strings.Contains(cidr, ".") {
-		// interface6 set is only created in the nft table when IPv6 is enabled.
-		// Skip silently if IPv6 was not enabled to avoid "No such file or directory" errors.
 		if !activeIPv6 {
 			return
 		}
