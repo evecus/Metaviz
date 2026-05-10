@@ -455,6 +455,8 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32,
 
 func cleanup(modes config.ProxyModes, ipv6 bool, tunDevice string) {
 	_ = runCmd("nft delete table inet metaviz")
+	// Clean up legacy standalone cn-bypass table left by older versions.
+	_ = runCmd("nft delete table inet metaviz_cnbypass")
 
 	if modes.NeedsTProxyInbound() {
 		cleanupTProxyRoutes(ipv6)
