@@ -328,7 +328,7 @@ function updateMem() {
 
 let clockTimer = null
 onMounted(async () => {
-  try { const r = await api('GET', '/mihomo/version'); mihomoVersion.value = r.version } catch {}
+  try { const r = await api('GET', '/mihomo/version'); mihomoVersion.value = (r.version || '').match(/v[\d.]+/)?.[0] || r.version } catch {}
   try { proxySettings.value = await api('GET', '/proxy-settings') } catch {}
   await Promise.all([nodesStore.load(), subsStore.load(), loadUploadedConfigs()])
   clockTimer = setInterval(() => { now.value = new Date().toLocaleTimeString('zh-CN'); updateMem() }, 2000)
