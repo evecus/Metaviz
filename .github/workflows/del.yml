@@ -1,0 +1,32 @@
+name: Cleanup All Releases and Tags
+
+on:
+  # 设置为手动触发，防止自动运行导致数据丢失
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 必须开启写入权限才能删除数据
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 获取所有历史以确保能列出所有 tags
+
+      - name: Delete All Releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching releases..."
+          # 获取所有 Release 标题并逐一删除
+          gh release list --limit 1000 | cut -f1 | xargs -I {} -n 1 gh release delete {} --yes || echo "No releases found."
+
+      - name: Delete All Remote Tags
+        run: |
+          echo "Fetching tags..."
+          # 获取远程所有 tags 并批量推送删除指令
+          # 过滤掉可能存在的空行，确保命令健壮
+          git tag | xargs -I {} git push origin :refs/tags/{} || echo "No tags found."
