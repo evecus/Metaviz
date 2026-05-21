@@ -59,6 +59,23 @@
               <div><div class="toggle-label">绕过中国大陆 IP</div><div class="toggle-desc">防火墙规则层面绕过 CN IP（需要 cn-bypass.nft）</div></div>
               <label class="toggle"><input type="checkbox" v-model="ps.bypassCN"><div class="toggle-track"><div class="toggle-thumb"></div></div></label>
             </div>
+            <!-- Extra GID bypass -->
+            <div class="toggle-row" style="align-items:flex-start;flex-wrap:wrap;gap:8px">
+              <div style="flex:0 0 auto">
+                <div class="toggle-label">防火墙绕过 GID</div>
+                <div class="toggle-desc">多个 GID 用空格分隔，这些 GID 的流量将绕过代理直连</div>
+              </div>
+              <div style="flex:1;display:flex;align-items:center;gap:8px;min-width:200px">
+                <input
+                  v-model="extraGIDRaw"
+                  @blur="onExtraGIDBlur"
+                  placeholder="例：1000 1001 65534"
+                  style="flex:1;font-size:13px;font-family:monospace;padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg2,var(--color-bg));color:var(--text1,var(--color-text));outline:none"
+                  :style="extraGIDError ? 'border-color:#e05555' : ''"
+                />
+                <span v-if="extraGIDError" style="font-size:11px;color:#e05555;white-space:nowrap">{{ extraGIDError }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -338,7 +355,33 @@ const saveOk  = ref(false)
 const saveErr = ref('')
 
 // Proxy settings
-const ps = reactive({ systemProxy: false, tcpMode: 'redir', udpMode: 'tproxy', lanProxy: false, ipv6: false, bypassCN: false })
+const ps = reactive({ systemProxy: false, tcpMode: 'redir', udpMode: 'tproxy', lanProxy: false, ipv6: false, bypassCN: false, extraGIDs: [] })
+
+// Extra GID bypass — space-separated list, e.g. "1000 1001 65534"
+const extraGIDRaw   = ref('')
+const extraGIDError = ref('')
+
+function parseGIDs(raw) {
+  const parts = raw.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return []
+  const result = []
+  for (const p of parts) {
+    if (!/^\d+$/.test(p)) return null
+    const n = parseInt(p, 10)
+    if (n < 0 || n > 65535) return null
+    result.push(n)
+  }
+  return result
+}
+
+function onExtraGIDBlur() {
+  if (!extraGIDRaw.value.trim()) { extraGIDError.value = ''; ps.extraGIDs = []; return }
+  const gids = parseGIDs(extraGIDRaw.value)
+  if (gids === null) { extraGIDError.value = '只能输入数字（0-65535），多个用空格分隔'; return }
+  extraGIDError.value = ''
+  extraGIDRaw.value = gids.join(' ')
+  ps.extraGIDs = gids
+}
 
 const tcpModes = [
   { v: 'off',    label: '关闭',     desc: '不启用 TCP 透明代理' },
@@ -391,6 +434,9 @@ async function loadAll() {
       api('GET', '/rulesets'),
     ])
     Object.assign(ps, psData)
+    const gids = Array.isArray(psData.extraGIDs) ? psData.extraGIDs.filter(Boolean) : []
+    ps.extraGIDs = gids
+    extraGIDRaw.value = gids.join(' ')
     // Deep merge ms
     for (const k of Object.keys(msData)) {
       if (typeof msData[k] === 'object' && msData[k] !== null && !Array.isArray(msData[k])) {
@@ -409,6 +455,8 @@ async function loadAll() {
 async function saveAll() {
   saving.value = true; saveOk.value = false; saveErr.value = ''
   try {
+    onExtraGIDBlur()
+    if (extraGIDError.value) { saving.value = false; return }
     await api('POST', '/proxy-settings', { ...ps })
 
     const msPayload = JSON.parse(JSON.stringify(ms))
