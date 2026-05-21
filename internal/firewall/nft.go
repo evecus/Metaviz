@@ -58,8 +58,8 @@ func privateRangesV6(fakeip bool) string {
 
 // ── Entry point ────────────────────────────────────────────────────────────
 
-func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config, fakeIP bool) error {
-	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf, fakeIP)
+func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, extraGIDs []uint32, ipf ipfilter.Config, fakeIP bool) error {
+	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, extraGIDs, ipf, fakeIP)
 	if err := os.WriteFile(nftConfPath, []byte(conf), 0644); err != nil {
 		return fmt.Errorf("write nft conf: %w", err)
 	}
@@ -213,7 +213,7 @@ func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSn
 
 // ── Main table builder ─────────────────────────────────────────────────────
 
-func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config, fakeIP bool) string {
+func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, extraGIDs []uint32, ipf ipfilter.Config, fakeIP bool) string {
 	ipfSetDef, ipfRule := buildIPFilterNft(ipf, lanProxy)
 	var s strings.Builder
 
@@ -255,7 +255,7 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
 
 	s.WriteString(buildProxyRuleChain(modes, ipfRule, ipv6, bypassCN, fakeIP))
 	s.WriteString(buildManglePrerouting(modes, ports, lanProxy, ipv6, tunDevice))
-	s.WriteString(buildMangleOutput(modes, ipv6, gid))
+	s.WriteString(buildMangleOutput(modes, ipv6, gid, extraGIDs))
 
 	s.WriteString(`
     chain prerouting_mangle {
@@ -269,7 +269,7 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
     }
 `)
 
-	s.WriteString(buildNATChains(modes, ports, ipv6, gid, fakeIP))
+	s.WriteString(buildNATChains(modes, ports, ipv6, gid, extraGIDs, fakeIP))
 	s.WriteString("}\n")
 	return s.String()
 }
@@ -363,12 +363,31 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 	return s.String()
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+// skgidRule returns a single nftables rule bypassing all given GIDs.
+// Single GID: "meta skgid N return"
+// Multiple:   "meta skgid { N, M, ... } return"
+func skgidRule(gid uint32, extraGIDs []uint32) string {
+	all := make([]uint32, 0, 1+len(extraGIDs))
+	all = append(all, gid)
+	all = append(all, extraGIDs...)
+	if len(all) == 1 {
+		return fmt.Sprintf("        meta skgid %d return\n", all[0])
+	}
+	parts := make([]string, len(all))
+	for i, g := range all {
+		parts[i] = fmt.Sprintf("%d", g)
+	}
+	return fmt.Sprintf("        meta skgid { %s } return\n", strings.Join(parts, ", "))
+}
+
 // ── Mangle output chain ────────────────────────────────────────────────────
 
-func buildMangleOutput(modes config.ProxyModes, ipv6 bool, gid uint32) string {
+func buildMangleOutput(modes config.ProxyModes, ipv6 bool, gid uint32, extraGIDs []uint32) string {
 	var s strings.Builder
 	s.WriteString("\n    chain proxy_out {\n")
-	s.WriteString(fmt.Sprintf("        skgid %d return\n", gid))
+	s.WriteString(skgidRule(gid, extraGIDs))
 	nfproto := "meta nfproto ipv4"
 	if ipv6 {
 		nfproto = "meta nfproto { ipv4, ipv6 }"
@@ -380,7 +399,7 @@ func buildMangleOutput(modes config.ProxyModes, ipv6 bool, gid uint32) string {
 
 // ── NAT chains ─────────────────────────────────────────────────────────────
 
-func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32, fakeIP bool) string {
+func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32, extraGIDs []uint32, fakeIP bool) string {
 	var s strings.Builder
 
 	dnsV4 := fmt.Sprintf("        ip daddr != 127.0.0.1 meta l4proto { tcp, udp } th dport 53 redirect to :%d\n", ports.DNS)
@@ -388,12 +407,12 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32,
 	if ipv6 {
 		dnsV6 = fmt.Sprintf("        ip6 daddr != ::1 meta l4proto { tcp, udp } th dport 53 redirect to :%d\n", ports.DNS)
 	}
+	skgid := skgidRule(gid, extraGIDs)
 	s.WriteString(fmt.Sprintf(`
     chain dns_redirect {
-        skgid %d return
-        meta l4proto { tcp, udp } th dport %d return
+%s        meta l4proto { tcp, udp } th dport %d return
 %s%s    }
-`, gid, ports.DNS, dnsV4, dnsV6))
+`, skgid, ports.DNS, dnsV4, dnsV6))
 
 	if modes.TCP == config.TCPModeRedir {
 		nfproto := "meta nfproto ipv4"
@@ -406,11 +425,10 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32,
 		}
 		s.WriteString(fmt.Sprintf(`
     chain tcp_redirect {
-        skgid %d return
-%s%s        ip daddr @interface return
+%s%s%s        ip daddr @interface return
         %s meta l4proto tcp redirect to :%d
     }
-`, gid, privateRangesV4(fakeIP), ipv6Ranges, nfproto, ports.Redirect))
+`, skgid, privateRangesV4(fakeIP), ipv6Ranges, nfproto, ports.Redirect))
 	}
 
 	// fakeip ping 劫持链：把发往 fakeip 段的 ICMP echo-request 重定向到本机，

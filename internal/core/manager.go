@@ -69,6 +69,9 @@ type ProxySettings struct {
 	LanProxy    bool           `json:"lanProxy"`
 	IPv6        bool           `json:"ipv6"`
 	BypassCN    bool           `json:"bypassCN"`
+	// ExtraGIDs is a list of additional GIDs whose traffic is bypassed by the
+	// firewall (not intercepted by mihomo). Empty means disabled.
+	ExtraGIDs []uint32 `json:"extraGIDs"`
 }
 
 func (ps ProxySettings) toProxyModes() config.ProxyModes {
@@ -411,7 +414,7 @@ func (m *Manager) Start(p StartParams) error {
 	if tunDevice == "" {
 		tunDevice = "Meta"
 	}
-	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, tunDevice, m.dataDir, gid, ipf, ps.SystemProxy, ms.Inbound.FakeIP); err != nil {
+	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, tunDevice, m.dataDir, gid, ps.ExtraGIDs, ipf, ps.SystemProxy, ms.Inbound.FakeIP); err != nil {
 		return fmt.Errorf("firewall: %w", err)
 	}
 

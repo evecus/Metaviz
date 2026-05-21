@@ -38,7 +38,7 @@ type Ports struct {
 //
 // 上传配置模式下也应传入 fakeIP=true（若用户配置了 fakeip），
 // 防火墙规则与配置模式无关，只要 fakeip 池地址需要被代理就需要开启。
-func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, ipf ipfilter.Config, systemProxy bool, fakeIP bool) error {
+func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, extraGIDs []uint32, ipf ipfilter.Config, systemProxy bool, fakeIP bool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -63,7 +63,7 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 		return nil
 	}
 
-	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf, fakeIP); err != nil {
+	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, extraGIDs, ipf, fakeIP); err != nil {
 		return fmt.Errorf("nft setup: %w", err)
 	}
 
